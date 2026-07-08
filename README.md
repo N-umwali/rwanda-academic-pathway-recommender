@@ -56,7 +56,8 @@ rwanda-academic-pathway-recommender/
 │
 ├── notebooks/
 │   └── Explainable_Academic_Pathway_Recommender_Model.ipynb
-│
+│__Deployed app linK/
+|     |__https://rwanda-academic-pathway-recommender.streamlit.app/
 ├── screenshots/
 │   ├── 01_home_page.png
 │   ├── 02_recommendation_form.png
@@ -68,6 +69,7 @@ rwanda-academic-pathway-recommender/
 │
 └── demo/
     └── video_link.txt
+
 ```
 
 ---
