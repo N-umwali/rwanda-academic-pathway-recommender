@@ -56,8 +56,6 @@ rwanda-academic-pathway-recommender/
 │
 ├── notebooks/
 │   └── Explainable_Academic_Pathway_Recommender_Model.ipynb
-│__Deployed app linK/
-|     |__https://rwanda-academic-pathway-recommender.streamlit.app/
 ├── screenshots/
 │   ├── 01_home_page.png
 │   ├── 02_recommendation_form.png
@@ -68,7 +66,7 @@ rwanda-academic-pathway-recommender/
 │   └── 07_app_running_terminal.png
 │
 └── demo/
-    └── video_link.txt
+    └── https://youtu.be/2N_InuK50Po
 
 ```
 
@@ -234,7 +232,7 @@ The community can use this product as a starting point for improving career guid
 Deployed app link:
 
 ```text
-Paste your deployed Streamlit app link here
+https://rwanda-academic-pathway-recommender.streamlit.app/
 ```
 
 ---
@@ -244,7 +242,7 @@ Paste your deployed Streamlit app link here
 A 5-minute demo video showing the core functionalities of the app is available here:
 
 ```text
-Paste your demo video link here
+https://youtu.be/2N_InuK50Po
 ```
 
 The video focuses on the main recommendation functionality, different student profile tests, bridge course output, and how the product aligns with the project proposal.
