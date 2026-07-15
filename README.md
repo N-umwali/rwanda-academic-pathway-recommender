@@ -46,27 +46,58 @@ rwanda-academic-pathway-recommender/
 ├── app.py
 ├── README.md
 ├── requirements.txt
-├── .gitignore
+├── runtime.txt
+├── demo_video_link.txt
+├── .gitattributes
 │
 ├── models/
 │   └── academic_pathway_model.joblib
 │
 ├── data/
-│   └── sample_test_cases.csv
+│   ├── Academic Pathway and Bridge Course Recommendation Dataset.xlsx
+│   └── rwandan_student_pathway_dataset.xlsx
 │
-├── notebooks/
+├── notebook/
 │   └── Explainable_Academic_Pathway_Recommender_Model.ipynb
-├── screenshots/
-│   ├── 01_home_page.png
-│   ├── 02_recommendation_form.png
-│   ├── 03_general_education_result.png
-│   ├── 04_tvet_result.png
-│   ├── 05_edge_case_result.png
-│   ├── 06_feedback_page.png
-│   └── 07_app_running_terminal.png
 │
-└── demo/
-    └── https://youtu.be/2N_InuK50Po
+├── pages/
+│   ├── 1_Get_Recommendation.py
+│   ├── 2_Advisor_Dashboard.py
+│   ├── 3_Methodology.py
+│   ├── 4_Data_and_Governance.py
+│   ├── 5_Responsible_Use.py
+│   ├── 6_Feedback.py
+│   └── 7_Recommendation_Report.py
+│
+├── static/
+│   ├── branding/
+│   │   ├── portal_logo.png
+│   │   ├── portal_mark.svg
+│   │   └── rwanda_map_watermark.svg
+│   │
+│   ├── icons/
+│   │   ├── actions/
+│   │   ├── content/
+│   │   ├── metrics/
+│   │   ├── navigation/
+│   │   └── workflow/
+│   │
+│   └── images/
+│       ├── advisor_review_faceless.jpg
+│       ├── analytics_laptop_graphs.png
+│       ├── bridge_course_notes_faceless.jpg
+│       ├── feedback_writing_faceless.jpg
+│       ├── hero_graduate_rear_view.jpg
+│       ├── learner_profile_faceless.jpg
+│       ├── methodology_teacher_rear_view.jpg
+│       └── student_collaboration_faceless.jpg
+│
+└── screenshots/
+    ├── General Education in Arts and Humanities student profile.png
+    ├── General education Output(Recommendation).png
+    ├── General Education Student profile.png
+    ├── Home page.png
+    └── TVET student profile.png
 
 ```
 
@@ -74,15 +105,20 @@ rwanda-academic-pathway-recommender/
 
 ## Related Project Files
 
-| File/Folder        | Description                                                                                          |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| `app.py`           | Main Streamlit application file                                                                      |
-| `models/`          | Contains the trained machine learning model saved using Joblib                                       |
-| `notebooks/`       | Contains the final notebook used for data preparation, model training, testing, and saving the model |
-| `data/`            | Contains sample test cases used for demo and testing                                                 |
-| `screenshots/`     | Contains screenshots showing product testing and functionality                                       |
-| `demo/`            | Contains the link to the 5-minute demo video                                                         |
-| `requirements.txt` | Lists the Python libraries required to run the app                                                   |
+| File/Folder        | Description                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `app.py`           | Main Streamlit application file containing the integrated interface, navigation, recommendation logic, and model connection |
+| `models/`          | Contains the trained machine learning model saved using Joblib                                                   |
+| `notebook/`        | Contains the final notebook used for data preparation, model training, testing, and saving the model             |
+| `data/`            | Contains the project datasets used for model development and testing                                             |
+| `pages/`           | Contains the supporting Streamlit page files for recommendations, analytics, methodology, governance, responsible use, feedback, and reports |
+| `static/branding/` | Contains the portal logo, portal mark, and Rwanda map watermark                                                  |
+| `static/icons/`    | Contains SVG icons used for navigation, metrics, workflow steps, actions, and content cards                      |
+| `static/images/`   | Contains the real photographs used in banners, reports, and other applicable visual sections                     |
+| `screenshots/`     | Contains screenshots showing product testing and functionality                                                   |
+| `demo_video_link.txt` | Contains the link to the 5-minute demo video                                                                  |
+| `requirements.txt` | Lists the Python libraries required to run the app                                                               |
+| `runtime.txt`      | Specifies the Python runtime used for deployment                                                                 |
 
 ---
 
