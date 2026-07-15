@@ -1182,13 +1182,85 @@ def _nav_icon_data_uri(filename, color):
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("utf-8")
 
 _nav_rules = ["""
-div[role="radiogroup"] > label { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:9px; color:#D9E8FA; background:transparent; border:none; margin-bottom:6px; cursor:pointer; }
-div[role="radiogroup"] > label:hover { background: rgba(255,255,255,0.08); }
-div[role="radiogroup"] > label:has(input:checked) { background:#2367CF; color:#FFFFFF; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); }
-div[role="radiogroup"] > label > div:first-of-type { display:none; }
-div[role="radiogroup"] > label p { color:inherit !important; font-weight:700; margin:0; font-size:14px; }
-div[role="radiogroup"] > label::before { content:""; width:19px; height:19px; flex:none; background:center / contain no-repeat; }
+section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    margin-bottom: 6px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: #D9E8FA !important;
+    cursor: pointer;
+}
+
+/* Force unselected navigation text to remain visible */
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label p,
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label span,
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label div {
+    color: #D9E8FA !important;
+    -webkit-text-fill-color: #D9E8FA !important;
+    opacity: 1 !important;
+}
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Active navigation item */
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label:has(input:checked) {
+    background: #4F63D9 !important;
+    color: #FFFFFF !important;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
+}
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label:has(input:checked) p,
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label:has(input:checked) span,
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label:has(input:checked) div {
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    opacity: 1 !important;
+}
+
+/* Hide Streamlit radio circles */
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label > div:first-of-type {
+    display: none;
+}
+
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label p {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* Space reserved for each SVG icon */
+section[data-testid="stSidebar"]
+div[role="radiogroup"] > label::before {
+    content: "";
+    width: 19px;
+    height: 19px;
+    flex: none;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+}
 """]
+
 for _idx, _fname in enumerate(NAV_ICON_FILES, start=1):
     _pale = _nav_icon_data_uri(_fname, "#D9E8FA")
     _white = _nav_icon_data_uri(_fname, "#FFFFFF")
@@ -1229,6 +1301,28 @@ if _wm_uri:
             pointer-events: none;
         }}
         .hero-grid {{ position: relative; z-index: 1; }}
+
+/* Sidebar information-card visibility */
+section[data-testid="stSidebar"] .sidebar-box,
+section[data-testid="stSidebar"] .sidebar-box p,
+section[data-testid="stSidebar"] .sidebar-box span,
+section[data-testid="stSidebar"] .sidebar-box div,
+section[data-testid="stSidebar"] .sidebar-box b {
+    color: #F8FAFC !important;
+    -webkit-text-fill-color: #F8FAFC !important;
+    opacity: 1 !important;
+}
+
+section[data-testid="stSidebar"] .sidebar-section-title {
+    color: #A7C8FF !important;
+    -webkit-text-fill-color: #A7C8FF !important;
+}
+
+section[data-testid="stSidebar"] .sidebar-subtitle {
+    color: #CFE3FF !important;
+    -webkit-text-fill-color: #CFE3FF !important;
+}
+
         </style>
         """,
         unsafe_allow_html=True,
