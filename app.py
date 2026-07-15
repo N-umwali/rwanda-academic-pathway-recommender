@@ -1065,6 +1065,100 @@ div.stButton > button, div.stFormSubmitButton > button, div.stDownloadButton > b
   .header-user { display:none; }
   .banner-title { font-size:22px; }
 }
+
+/* =====================================================
+   GET RECOMMENDATION FORM VISIBILITY
+   ===================================================== */
+
+/* Titles and descriptions inside bordered form panels */
+[data-testid="stMain"]
+[data-testid="stVerticalBlockBorderWrapper"] h1,
+
+[data-testid="stMain"]
+[data-testid="stVerticalBlockBorderWrapper"] h2,
+
+[data-testid="stMain"]
+[data-testid="stVerticalBlockBorderWrapper"] h3 {
+    color: #0F172A !important;
+    opacity: 1 !important;
+}
+
+[data-testid="stMain"] .stCaption p {
+    color: #64748B !important;
+    opacity: 1 !important;
+}
+
+/* Input labels */
+[data-testid="stMain"] .stSelectbox label,
+[data-testid="stMain"] .stSlider label,
+[data-testid="stMain"] .stTextArea label,
+[data-testid="stMain"] .stTextInput label {
+    color: #334155 !important;
+    font-weight: 700 !important;
+    opacity: 1 !important;
+}
+
+/* Select box container */
+[data-testid="stMain"] div[data-baseweb="select"] > div {
+    background-color: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+    border-radius: 12px !important;
+    color: #0F172A !important;
+    min-height: 48px !important;
+}
+
+/* Selected value and placeholder */
+[data-testid="stMain"] div[data-baseweb="select"] span,
+[data-testid="stMain"] div[data-baseweb="select"] input {
+    color: #0F172A !important;
+    -webkit-text-fill-color: #0F172A !important;
+    opacity: 1 !important;
+}
+
+/* Dropdown arrow */
+[data-testid="stMain"] div[data-baseweb="select"] svg {
+    fill: #475569 !important;
+    color: #475569 !important;
+}
+
+/* Focus state */
+[data-testid="stMain"] div[data-baseweb="select"] > div:focus-within {
+    border-color: #2563EB !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12) !important;
+}
+
+/* Open dropdown menu */
+div[data-baseweb="popover"] {
+    background: #FFFFFF !important;
+}
+
+ul[role="listbox"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+}
+
+li[role="option"] {
+    background-color: #FFFFFF !important;
+    color: #0F172A !important;
+}
+
+li[role="option"] span {
+    color: #0F172A !important;
+}
+
+li[role="option"]:hover {
+    background-color: #EFF6FF !important;
+    color: #1D4ED8 !important;
+}
+
+/* Slider and text-area values */
+[data-testid="stMain"] textarea,
+[data-testid="stMain"] input {
+    background-color: #FFFFFF !important;
+    color: #0F172A !important;
+    -webkit-text-fill-color: #0F172A !important;
+}
+                        
 </style>
 """, unsafe_allow_html=True)
 
