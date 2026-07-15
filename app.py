@@ -1270,64 +1270,80 @@ for _idx, _fname in enumerate(NAV_ICON_FILES, start=1):
         _nav_rules.append(f'div[role="radiogroup"] > label:nth-child({_idx}):has(input:checked)::before {{ background-image:url("{_white}"); }}')
 render_html("<style>" + "\n".join(_nav_rules) + "</style>")
 
-# Rwanda map watermark, fixed behind all page content
+# Rwanda map watermark and sidebar text visibility
 _wm_uri = watermark_data_uri()
+
+watermark_css = ""
+
 if _wm_uri:
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stAppViewContainer"]::before {{
-            content: "";
-            position: fixed;
-            right: -10%;
-            bottom: -16%;
-            width: 58vw;
-            height: 58vw;
-            background: url("{_wm_uri}") no-repeat center / contain;
-            opacity: 0.045;
-            pointer-events: none;
-            z-index: 0;
-        }}
-        .hero-card {{ position: relative; overflow: hidden; }}
-        .hero-card::before {{
-            content: "";
-            position: absolute;
-            top: -12%;
-            right: 24%;
-            width: 430px;
-            height: 430px;
-            background: url("{_wm_uri}") no-repeat center / contain;
-            opacity: 0.07;
-            pointer-events: none;
-        }}
-        .hero-grid {{ position: relative; z-index: 1; }}
+    watermark_css = f"""
+    [data-testid="stAppViewContainer"]::before {{
+        content: "";
+        position: fixed;
+        right: -10%;
+        bottom: -16%;
+        width: 58vw;
+        height: 58vw;
+        background: url("{_wm_uri}") no-repeat center / contain;
+        opacity: 0.045;
+        pointer-events: none;
+        z-index: 0;
+    }}
 
-/* Sidebar information-card visibility */
-section[data-testid="stSidebar"] .sidebar-box,
-section[data-testid="stSidebar"] .sidebar-box p,
-section[data-testid="stSidebar"] .sidebar-box span,
-section[data-testid="stSidebar"] .sidebar-box div,
-section[data-testid="stSidebar"] .sidebar-box b {
-    color: #F8FAFC !important;
-    -webkit-text-fill-color: #F8FAFC !important;
-    opacity: 1 !important;
-}
+    .hero-card {{
+        position: relative;
+        overflow: hidden;
+    }}
 
-section[data-testid="stSidebar"] .sidebar-section-title {
-    color: #A7C8FF !important;
-    -webkit-text-fill-color: #A7C8FF !important;
-}
+    .hero-card::before {{
+        content: "";
+        position: absolute;
+        top: -12%;
+        right: 24%;
+        width: 430px;
+        height: 430px;
+        background: url("{_wm_uri}") no-repeat center / contain;
+        opacity: 0.07;
+        pointer-events: none;
+    }}
 
-section[data-testid="stSidebar"] .sidebar-subtitle {
-    color: #CFE3FF !important;
-    -webkit-text-fill-color: #CFE3FF !important;
-}
+    .hero-grid {{
+        position: relative;
+        z-index: 1;
+    }}
+    """
 
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    f"""
+    <style>
+    {watermark_css}
 
+    /* Sidebar information-card visibility */
+    section[data-testid="stSidebar"] .sidebar-box,
+    section[data-testid="stSidebar"] .sidebar-box p,
+    section[data-testid="stSidebar"] .sidebar-box span,
+    section[data-testid="stSidebar"] .sidebar-box div,
+    section[data-testid="stSidebar"] .sidebar-box b {{
+        color: #F8FAFC !important;
+        -webkit-text-fill-color: #F8FAFC !important;
+        opacity: 1 !important;
+    }}
+
+    section[data-testid="stSidebar"] .sidebar-section-title {{
+        color: #A7C8FF !important;
+        -webkit-text-fill-color: #A7C8FF !important;
+        opacity: 1 !important;
+    }}
+
+    section[data-testid="stSidebar"] .sidebar-subtitle {{
+        color: #CFE3FF !important;
+        -webkit-text-fill-color: #CFE3FF !important;
+        opacity: 1 !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 # =========================================================
 # NAVIGATION STATE
 # =========================================================
