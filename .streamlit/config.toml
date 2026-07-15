@@ -1,0 +1,21 @@
+[client]
+showSidebarNavigation = false
+toolbarMode = "minimal"
+
+[server]
+enableStaticServing = true
+
+[theme]
+base = "light"
+primaryColor = "#2367CF"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0F172A"
+showSidebarBorder = false
+
+[theme.sidebar]
+primaryColor = "#60A5FA"
+backgroundColor = "#062B5D"
+secondaryBackgroundColor = "#0A376F"
+textColor = "#FFFFFF"
+borderColor = "#315A87"
