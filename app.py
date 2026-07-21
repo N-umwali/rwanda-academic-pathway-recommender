@@ -9,7 +9,6 @@ import joblib
 import pandas as pd
 import streamlit as st
 import numpy as np
-import shap
 
 # =========================================================
 # LOCAL PROJECT PATHS
@@ -358,6 +357,100 @@ INTEREST_AREA_TO_CAREER_CLUSTERS = {
     "UI/UX Design and Digital Product Design": ["Multimedia, Graphic Design and Digital Media Production", "Software Engineering and Application Development"],
 }
 
+
+# Relevant interest areas offered for each TVET sector.
+# The trade-aligned interest is always displayed first, while learners can
+# explore other closely related directions without creating unrelated profiles.
+TVET_SECTOR_TO_INTEREST_AREAS = {
+    "ICT and Multimedia Sector": [
+        "Networking and Cloud Infrastructure",
+        "Cybersecurity",
+        "Software Engineering and Development",
+        "Data Science, AI, and Machine Learning",
+        "Multimedia and Digital Content Production",
+        "UI/UX Design and Digital Product Design",
+    ],
+    "Construction and Building Services Sector": [
+        "Construction and Technical Services",
+        "Science, Engineering, and Mathematics",
+        "Manufacturing and Industrial Production",
+        "UI/UX Design and Digital Product Design",
+        "Business Management and Entrepreneurship",
+    ],
+    "Hospitality and Tourism Sector": [
+        "Hospitality, Tourism, and Service Sector",
+        "Business Management and Entrepreneurship",
+        "Communication, Marketing, and Public Relations",
+        "Languages, Translation, and Interpretation",
+        "International Relations and Diplomacy",
+    ],
+    "Energy and Technical Services Sector": [
+        "Science, Engineering, and Mathematics",
+        "Construction and Technical Services",
+        "Manufacturing and Industrial Production",
+        "Networking and Cloud Infrastructure",
+        "Data Science, AI, and Machine Learning",
+    ],
+    "Manufacturing, Mining, and Transport Sector": [
+        "Transport and Logistics",
+        "Manufacturing and Industrial Production",
+        "Science, Engineering, and Mathematics",
+        "Construction and Technical Services",
+        "Business Management and Entrepreneurship",
+    ],
+    "Agriculture and Food Processing Sector": [
+        "Agriculture, Food Processing, and Environment",
+        "Science, Engineering, and Mathematics",
+        "Business Management and Entrepreneurship",
+        "Hospitality, Tourism, and Service Sector",
+        "Data Science, AI, and Machine Learning",
+    ],
+    "Business and Arts/Crafts Sector": [
+        "Finance, Accounting, and Banking",
+        "Business Management and Entrepreneurship",
+        "Arts, Media, and Creative Industries",
+        "Communication, Marketing, and Public Relations",
+        "UI/UX Design and Digital Product Design",
+    ],
+}
+
+
+def get_tvet_interest_options(tvet_sector, stream_or_trade):
+    """Return relevant TVET interest options with the trade suggestion first."""
+
+    default_interest = TVET_TRADE_TO_INTEREST_AREA.get(
+        stream_or_trade,
+        "Science, Engineering, and Mathematics",
+    )
+
+    sector_options = TVET_SECTOR_TO_INTEREST_AREAS.get(
+        tvet_sector,
+        RWANDA_INTEREST_AREAS,
+    )
+
+    return list(dict.fromkeys([default_interest, *sector_options]))
+
+
+def get_tvet_career_options(interest_area, stream_or_trade):
+    """Return relevant career options for the selected TVET interest area."""
+
+    default_career = TVET_TRADE_TO_CAREER_CLUSTER.get(
+        stream_or_trade,
+        "Business Administration and Management",
+    )
+
+    related_careers = INTEREST_AREA_TO_CAREER_CLUSTERS.get(
+        interest_area,
+        PROGRAM_CATEGORY_OPTIONS,
+    )
+
+    # Keep the trade-aligned career first only when it is compatible with
+    # the chosen interest. Otherwise show the interest-related careers only.
+    if default_career in related_careers:
+        return list(dict.fromkeys([default_career, *related_careers]))
+
+    return list(dict.fromkeys(related_careers))
+
 # =========================================================
 # LOAD MODEL ARTIFACT
 # =========================================================
@@ -446,11 +539,10 @@ def load_model_artifact():
         transformed_background
     )
 
-    # Reconstruct the SHAP explainer for the trained SVM
-    shap_explainer = shap.LinearExplainer(
-        fitted_classifier,
-        transformed_background
-    )
+    # Store the average transformed training profile so the app can
+    # calculate feature-level linear-model contributions without requiring
+    # an additional explainability package at deployment time.
+    transformed_background_mean = transformed_background.mean(axis=0)
 
     transformed_feature_names = (
         fitted_preprocessor.get_feature_names_out()
@@ -499,7 +591,7 @@ def load_model_artifact():
         ],
         "shap_background_profiles":
             shap_background_profiles,
-        "shap_explainer": shap_explainer,
+        "transformed_background_mean": transformed_background_mean,
         "transformed_feature_names":
             transformed_feature_names,
         "original_feature_groups":
@@ -523,7 +615,9 @@ PROGRAM_CATEGORY_TO_BRIDGE_COURSE = dict(
     DEFAULT_PROGRAM_CATEGORY_TO_BRIDGE_COURSE
 )
 
-SHAP_EXPLAINER = ARTIFACT["shap_explainer"]
+MODEL_BACKGROUND_MEAN = np.asarray(
+    ARTIFACT["transformed_background_mean"]
+)
 
 TRANSFORMED_FEATURE_NAMES = ARTIFACT[
     "transformed_feature_names"
@@ -1174,17 +1268,21 @@ def prepare_profile_for_model(student_profile):
         profile["WeakestSubject"] = "Academic Theory"
         profile["InterestArea"] = "Technical Trades"
 
-        aligned_specific_program = (
-            TVET_TRADE_TO_CAREER_CLUSTER.get(
-                original_stream_or_trade,
-                profile.get("CareerCluster", ""),
-            )
+        selected_specific_program = str(
+            profile.get("CareerCluster", "")
+        ).strip()
+        trade_aligned_program = TVET_TRADE_TO_CAREER_CLUSTER.get(
+            original_stream_or_trade,
+            selected_specific_program,
         )
-        profile["CareerCluster"] = (
-            MODEL_CAREER_CLUSTER_MAP.get(
-                aligned_specific_program,
-                "Engineering and Infrastructure",
-            )
+        program_for_model = (
+            selected_specific_program
+            if selected_specific_program in MODEL_CAREER_CLUSTER_MAP
+            else trade_aligned_program
+        )
+        profile["CareerCluster"] = MODEL_CAREER_CLUSTER_MAP.get(
+            program_for_model,
+            "Engineering and Infrastructure",
         )
 
     else:
@@ -1294,13 +1392,21 @@ def get_model_ranking(student_profile):
 def get_preferred_specific_program(student_profile):
     """Read the learner's explicit program direction from the profile."""
 
+    selected_program = student_profile.get("CareerCluster")
+
+    if (
+        selected_program
+        and selected_program in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY
+    ):
+        return selected_program
+
     if student_profile.get("EducationType") == "TVET":
         return TVET_TRADE_TO_CAREER_CLUSTER.get(
             student_profile.get("Stream_or_Trade"),
-            student_profile.get("CareerCluster"),
+            selected_program,
         )
 
-    return student_profile.get("CareerCluster")
+    return selected_program
 
 
 def refine_specific_program(student_profile, model_ranking):
@@ -1366,34 +1472,36 @@ def get_program_alternative(program, model_ranking):
     return "A related diploma, foundation, or advisor-recommended pathway."
 
 
-def get_grouped_shap_explanation(student_profile, model_ranking):
-    """Aggregate SHAP values back into the nine original model features."""
+def get_grouped_model_explanation(student_profile, model_ranking):
+    """
+    Aggregate the trained linear model's feature contributions back into
+    the nine original learner-profile fields.
+
+    This calculation uses the fitted SVM coefficients and the average
+    transformed training profile. It avoids an extra runtime dependency
+    while preserving a genuine feature-level explanation.
+    """
 
     student_df = model_ranking["student_df"]
     fitted_preprocessor = MODEL.named_steps["preprocessor"]
+    fitted_classifier = MODEL.named_steps["classifier"]
+
     transformed_profile = fitted_preprocessor.transform(student_df)
 
     if hasattr(transformed_profile, "toarray"):
         transformed_profile = transformed_profile.toarray()
 
-    shap_result = SHAP_EXPLAINER(
-        np.asarray(transformed_profile)
-    )
-    shap_values = np.asarray(shap_result.values)
+    transformed_profile = np.asarray(transformed_profile)[0]
     predicted_class_id = model_ranking["predicted_class_id"]
 
-    if shap_values.ndim == 3:
-        class_shap_values = shap_values[
-            0,
-            :,
-            predicted_class_id,
-        ]
-    elif shap_values.ndim == 2:
-        class_shap_values = shap_values[0]
-    else:
-        return []
+    class_coefficients = np.asarray(
+        fitted_classifier.coef_[predicted_class_id]
+    )
 
-    model_profile = prepare_profile_for_model(student_profile)
+    encoded_contributions = (
+        transformed_profile - MODEL_BACKGROUND_MEAN
+    ) * class_coefficients
+
     explanation_rows = []
 
     for feature in MODEL_INPUT_FEATURES:
@@ -1402,8 +1510,14 @@ def get_grouped_shap_explanation(student_profile, model_ranking):
             continue
 
         contribution = float(
-            class_shap_values[encoded_indices].sum()
+            encoded_contributions[encoded_indices].sum()
         )
+
+        display_value = student_profile.get(
+            feature,
+            "Not recorded",
+        )
+
         explanation_rows.append(
             {
                 "feature": feature,
@@ -1411,7 +1525,7 @@ def get_grouped_shap_explanation(student_profile, model_ranking):
                     feature,
                     feature,
                 ),
-                "model_value": model_profile.get(feature, "Not recorded"),
+                "display_value": display_value,
                 "contribution": contribution,
                 "absolute_contribution": abs(contribution),
             }
@@ -1459,7 +1573,7 @@ def recommend_student(student_profile):
         model_ranking,
     )
     recommendation_source = (
-        "Trained Support Vector Machine + profile-aligned program refinement"
+        "Learner profile and academic pathway guidance"
     )
 
     return (
@@ -1470,80 +1584,169 @@ def recommend_student(student_profile):
     )
 
 
-def build_explanation(profile, program, bridge, alternative, source):
-    """Create a concise explanation grounded in the SVM and SHAP values."""
+def build_explanation(
+    profile,
+    program,
+    bridge,
+    alternative,
+    source,
+):
+    """Create a clear explanation for learners and academic advisors."""
+
+    def clean_value(value, fallback="Not specified"):
+        text = str(value or "").strip()
+        return text if text else fallback
+
+    education_type = clean_value(profile.get("EducationType"))
+    pathway = clean_value(profile.get("Pathway"))
+    stream_or_trade = clean_value(profile.get("Stream_or_Trade"))
+    strongest_area = clean_value(profile.get("BestSubject"))
+    support_area = clean_value(profile.get("WeakestSubject"))
+    interest_area = clean_value(profile.get("InterestArea"))
+    career_direction = clean_value(profile.get("CareerCluster"))
+    score_range = clean_value(profile.get("AverageScoreRange"))
 
     model_ranking = get_model_ranking(profile)
-    predicted_broad_category = model_ranking[
-        "predicted_broad_category"
-    ]
-    program_broad_category = SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(
-        program,
-        predicted_broad_category,
-    )
-    shap_rows = get_grouped_shap_explanation(
+    explanation_rows = get_grouped_model_explanation(
         profile,
         model_ranking,
     )
+    most_influential = explanation_rows[:3]
 
-    most_influential = shap_rows[:3]
     if most_influential:
-        influence_text = ", ".join(
-            f"**{row['display_name']}** ({row['model_value']})"
+        influence_items = [
+            f"**{row['display_name']}**"
             for row in most_influential
+        ]
+        if len(influence_items) == 1:
+            influence_list = influence_items[0]
+        elif len(influence_items) == 2:
+            influence_list = (
+                f"{influence_items[0]} and {influence_items[1]}"
+            )
+        else:
+            influence_list = (
+                f"{influence_items[0]}, {influence_items[1]}, "
+                f"and {influence_items[2]}"
+            )
+
+        influence_reason = (
+            f"The parts of your profile that had the greatest influence "
+            f"on this guidance were your {influence_list}."
         )
     else:
-        influence_text = (
-            "the learner's pathway, stream or trade, interest area, "
-            "and career direction"
+        influence_reason = (
+            "Your education background, strengths, interests, and career "
+            "direction were considered together when preparing this guidance."
         )
 
-    if program_broad_category == predicted_broad_category:
-        refinement_text = (
-            f"Within that model-ranked field, **{program}** was selected "
-            "as the most relevant specific direction."
+    if education_type == "TVET":
+        recommendation_reason = (
+            f"**{program}** is recommended because your TVET training in "
+            f"**{stream_or_trade}** provides a relevant foundation for this "
+            f"academic direction. Your strongest competency, "
+            f"**{strongest_area}**, also supports further study in this area."
         )
-    elif broad_categories_are_related(
-        program_broad_category,
-        predicted_broad_category,
+
+        expected_interest = clean_value(
+            TVET_TRADE_TO_INTEREST_AREA.get(stream_or_trade, ""),
+            "",
+        )
+        expected_career = clean_value(
+            TVET_TRADE_TO_CAREER_CLUSTER.get(stream_or_trade, ""),
+            "",
+        )
+
+        interest_is_different = (
+            expected_interest
+            and interest_area.casefold() != expected_interest.casefold()
+        )
+        career_is_different = (
+            expected_career
+            and career_direction.casefold() != expected_career.casefold()
+        )
+
+        if interest_is_different or career_is_different:
+            preference_reason = (
+                f"You also selected **{interest_area}** as an interest area and "
+                f"**{career_direction}** as a career direction. These choices "
+                f"may differ from your current TVET trade. This recommendation "
+                f"therefore gives greater attention to the training and practical "
+                f"skills you already have. An academic advisor can help you plan "
+                f"a transition when the new direction is your main goal."
+            )
+        else:
+            preference_reason = (
+                f"Your interest in **{interest_area}** and your preferred career "
+                f"direction, **{career_direction}**, are also consistent with "
+                f"this recommendation."
+            )
+    else:
+        recommendation_reason = (
+            f"**{program}** is recommended because your background in "
+            f"**{pathway}**, particularly **{stream_or_trade}**, provides a "
+            f"relevant starting point for this direction. Your strongest subject, "
+            f"**{strongest_area}**, also supports the knowledge and skills "
+            f"commonly required in this field."
+        )
+        preference_reason = (
+            f"Your interest in **{interest_area}** and your preferred career "
+            f"direction, **{career_direction}**, were also considered when "
+            f"identifying this recommendation."
+        )
+
+    if (
+        strongest_area.casefold() == support_area.casefold()
+        and strongest_area != "Not specified"
     ):
-        refinement_text = (
-            f"The learner's selected direction, **{program}**, belongs to "
-            f"the closely related **{program_broad_category}** field and was "
-            "therefore used as the specific recommendation."
+        support_reason = (
+            f"You selected **{strongest_area}** as both your strongest area and "
+            f"the area where you need support. Review this choice to make sure "
+            f"your profile accurately reflects your learning needs."
         )
     else:
-        refinement_text = (
-            f"The system refined the broad field to **{program}** using the "
-            "learner's selected interest and career direction."
+        support_reason = (
+            f"You identified **{support_area}** as an area needing support. "
+            f"Strengthening this area may improve your overall preparation for "
+            f"further study."
         )
 
-    score_range = profile.get("AverageScoreRange", "Not recorded")
-    readiness_sentence = ""
+    preparation_reason = (
+        f"To prepare for **{program}**, the recommended bridge courses are "
+        f"**{bridge}**. These courses can help strengthen the knowledge and "
+        f"practical skills commonly needed in this program."
+    )
+
     if score_range == "50–59%":
-        readiness_sentence = (
-            " Because the recorded score range is **50–59%**, the result "
-            "should be reviewed with an academic advisor and the suggested "
-            "bridge preparation should be completed before relying on it for "
-            "an admission decision."
+        readiness_reason = (
+            f"Your average score range is **50–59%**. This recommendation should "
+            f"be treated as a possible pathway rather than a confirmed admission "
+            f"match. Completing the suggested bridge preparation and speaking "
+            f"with an academic advisor will be especially important."
         )
     elif score_range == "60–69%":
-        readiness_sentence = (
-            " The **60–69%** score range indicates that targeted preparation "
-            "may strengthen readiness for this direction."
+        readiness_reason = (
+            f"Your average score range is **60–69%**. Additional preparation in "
+            f"the recommended bridge areas may strengthen your readiness and "
+            f"improve your options."
+        )
+    else:
+        readiness_reason = (
+            f"Your average score range of **{score_range}** provides a useful "
+            f"starting point for this direction. Official admission requirements "
+            f"should still be confirmed with the institution."
         )
 
     return (
-        f"The trained Support Vector Machine first classified the learner's "
-        f"profile under **{predicted_broad_category}**. {refinement_text}\n\n"
-        f"The most influential model inputs for the broad-field decision were "
-        f"{influence_text}. These influences were calculated from the saved "
-        f"model using SHAP after translating the dashboard selections into the "
-        f"same vocabulary used during training.\n\n"
-        f"To strengthen readiness for **{program}**, the system recommends "
-        f"**{bridge}**.{readiness_sentence}\n\n"
-        f"**Alternative pathway for advisor discussion:** {alternative}\n\n"
-        f"**Recommendation source:** {source}."
+        f"{recommendation_reason}\n\n"
+        f"{preference_reason}\n\n"
+        f"{influence_reason}\n\n"
+        f"{support_reason}\n\n"
+        f"{preparation_reason}\n\n"
+        f"{readiness_reason}\n\n"
+        f"**Another pathway to consider:** {alternative}\n\n"
+        f"This recommendation is intended to support exploration and discussion "
+        f"with an academic advisor. It is not an official admission decision."
     )
 
 
@@ -2357,30 +2560,36 @@ elif selected_page == "Get Recommendation":
                 best_subject = st.selectbox("Strongest Course / Competency", courses, key="best_competency")
                 weakest_subject = st.selectbox("Course / Competency Needing Support", courses, key="weak_competency")
 
-                default_interest = TVET_TRADE_TO_INTEREST_AREA.get(
+                interest_options = get_tvet_interest_options(
+                    tvet_sector,
                     stream_or_trade,
-                    "Science, Engineering, and Mathematics",
                 )
-                default_career = TVET_TRADE_TO_CAREER_CLUSTER.get(
-                    stream_or_trade,
-                    "Business Administration and Management",
-                )
-
-                st.text_input(
+                interest_area = st.selectbox(
                     "Interest Area",
-                    value=default_interest,
-                    disabled=False,
-                    key=f"tvet_interest_{stream_or_trade}",
-                )
-                st.text_input(
-                    "Career Cluster",
-                    value=default_career,
-                    disabled=False,
-                    key=f"tvet_career_{stream_or_trade}",
+                    interest_options,
+                    key=f"tvet_interest_{tvet_sector}_{stream_or_trade}",
+                    help=(
+                        "The trade-aligned interest is shown first. "
+                        "You may select another closely related direction."
+                    ),
                 )
 
-                interest_area = default_interest
-                career_cluster = default_career
+                career_options = get_tvet_career_options(
+                    interest_area,
+                    stream_or_trade,
+                )
+                career_cluster = st.selectbox(
+                    "Career Cluster",
+                    career_options,
+                    key=(
+                        f"tvet_career_{tvet_sector}_"
+                        f"{stream_or_trade}_{interest_area}"
+                    ),
+                    help=(
+                        "Career options are limited to programs related to "
+                        "the selected interest area."
+                    ),
+                )
 
             average_score_range = st.selectbox("Average Score Range", ["50–59%", "60–69%", "70–79%", "80–89%", "90–100%"], key="score_range")
             digital_skill_level = st.selectbox("Digital Skill Level", ["Beginner", "Intermediate", "Advanced"], key="digital_skill")
@@ -2413,10 +2622,42 @@ elif selected_page == "Get Recommendation":
 
                 explanation = build_explanation(profile, recommended_program, recommended_bridge_course, alternative_pathway, source)
 
-                result_card("Recommended Academic Program Category", recommended_program, "This category is produced from the learner profile and the notebook-aligned recommendation logic.", "green")
-                result_card("Recommended Bridge Course", recommended_bridge_course, "This bridge course is mapped directly from the recommended program category.", "blue")
-                result_card("Alternative Academic Pathway", alternative_pathway, "This provides a second route for discussion with an academic advisor.", "purple")
-                result_card("Recommendation Source", source, "The trained model ranks the broad field before the learner profile refines the specific program.", "gold")
+                result_card(
+                    "Recommended Academic Program",
+                    recommended_program,
+                    (
+                        "This program is aligned with the learner’s education "
+                        "background, strengths, interests, and career direction."
+                    ),
+                    "green",
+                )
+                result_card(
+                    "Recommended Bridge Courses",
+                    recommended_bridge_course,
+                    (
+                        "These courses can help the learner strengthen readiness "
+                        "for the recommended program."
+                    ),
+                    "blue",
+                )
+                result_card(
+                    "Alternative Academic Pathway",
+                    alternative_pathway,
+                    (
+                        "This is another related option to explore with an "
+                        "academic advisor."
+                    ),
+                    "purple",
+                )
+                result_card(
+                    "How This Guidance Was Prepared",
+                    source,
+                    (
+                        "The guidance considers the learner’s education background, "
+                        "strengths, interests, career direction, and readiness."
+                    ),
+                    "gold",
+                )
 
                 st.markdown("### Explanation of the Recommendation")
                 st.markdown(explanation)
