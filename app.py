@@ -8,16 +8,16 @@ from datetime import datetime
 import joblib
 import pandas as pd
 import streamlit as st
+import numpy as np
+import shap
 
 # =========================================================
 # LOCAL PROJECT PATHS
 # =========================================================
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "models" / "academic_pathway_model.joblib"
+MODEL_PATH = BASE_DIR / "models" / "academic_pathway_model_v2.joblib"
 
 IMAGE_DIR = BASE_DIR / "static" / "images"
-ICON_DIR = BASE_DIR / "static" / "icons"
-BRANDING_DIR = BASE_DIR / "static" / "branding"
 ICON_DIR = BASE_DIR / "static" / "icons"
 BRANDING_DIR = BASE_DIR / "static" / "branding"
 
@@ -363,57 +363,244 @@ INTEREST_AREA_TO_CAREER_CLUSTERS = {
 # =========================================================
 @st.cache_resource
 def load_model_artifact():
+    """Load and validate the final ML-first deployment bundle."""
+
     if not MODEL_PATH.exists():
         st.error(
-            f"Model file not found at: {MODEL_PATH}. Please place academic_pathway_model.joblib inside the models folder."
+            "The final model file was not found at:\n\n"
+            f"{MODEL_PATH}\n\n"
+            "Place academic_pathway_model_v2.joblib "
+            "inside the models folder."
         )
         st.stop()
 
-    artifact = joblib.load(MODEL_PATH)
-
-    if isinstance(artifact, dict):
-        model = artifact.get("model")
-        label_encoder = artifact.get("label_encoder")
-        input_features = artifact.get("input_features", INPUT_FEATURES)
-        bridge_course_map = artifact.get("bridge_course_map", {}) or {}
-        alternative_pathway_map = artifact.get("alternative_pathway_map", {}) or {}
-        model_name = artifact.get("model_name", "Saved Scikit-learn model")
-        timestamp = artifact.get("timestamp", "Not specified")
-    else:
-        model = artifact
-        label_encoder = None
-        input_features = INPUT_FEATURES
-        bridge_course_map = {}
-        alternative_pathway_map = {}
-        model_name = "Saved Scikit-learn model"
-        timestamp = "Not specified"
-
-    if model is None:
-        st.error("The model file was loaded, but no model object was found inside it.")
+    try:
+        artifact = joblib.load(MODEL_PATH)
+    except Exception as error:
+        st.error(
+            "The model artifact could not be loaded. "
+            "Confirm that requirements.txt uses "
+            "scikit-learn==1.6.1."
+        )
+        st.exception(error)
         st.stop()
 
-    if not bridge_course_map:
-        bridge_course_map = DEFAULT_PROGRAM_CATEGORY_TO_BRIDGE_COURSE
-
-    if not alternative_pathway_map:
-        alternative_pathway_map = DEFAULT_ALTERNATIVE_PATHWAY
-
-    return {
-        "model": model,
-        "label_encoder": label_encoder,
-        "input_features": input_features,
-        "bridge_course_map": bridge_course_map,
-        "alternative_pathway_map": alternative_pathway_map,
-        "model_name": model_name,
-        "timestamp": timestamp,
+    required_keys = {
+        "model_pipeline",
+        "label_encoder",
+        "feature_columns",
+        "bridge_course_mapping",
+        "score_range_order",
+        "digital_skill_order",
+        "shap_background_profiles",
+        "metadata",
     }
 
+    if not isinstance(artifact, dict):
+        st.error(
+            "The saved model must be a dictionary-based "
+            "deployment bundle."
+        )
+        st.stop()
+
+    missing_keys = required_keys - set(artifact.keys())
+
+    if missing_keys:
+        st.error(
+            "The model bundle is missing required components: "
+            + ", ".join(sorted(missing_keys))
+        )
+        st.stop()
+
+    model_pipeline = artifact["model_pipeline"]
+    label_encoder = artifact["label_encoder"]
+    feature_columns = artifact["feature_columns"]
+    bridge_course_mapping = artifact[
+        "bridge_course_mapping"
+    ]
+    shap_background_profiles = artifact[
+        "shap_background_profiles"
+    ]
+    metadata = artifact["metadata"]
+
+    # Retrieve the fitted preprocessing and SVM components
+    fitted_preprocessor = model_pipeline.named_steps[
+        "preprocessor"
+    ]
+
+    fitted_classifier = model_pipeline.named_steps[
+        "classifier"
+    ]
+
+    # Transform the saved SHAP background sample
+    transformed_background = fitted_preprocessor.transform(
+        shap_background_profiles
+    )
+
+    if hasattr(transformed_background, "toarray"):
+        transformed_background = (
+            transformed_background.toarray()
+        )
+
+    transformed_background = np.asarray(
+        transformed_background
+    )
+
+    # Reconstruct the SHAP explainer for the trained SVM
+    shap_explainer = shap.LinearExplainer(
+        fitted_classifier,
+        transformed_background
+    )
+
+    transformed_feature_names = (
+        fitted_preprocessor.get_feature_names_out()
+    )
+
+    # Link one-hot encoded columns to the original features
+    original_feature_groups = {}
+
+    for feature_index, transformed_name in enumerate(
+        transformed_feature_names
+    ):
+        clean_name = transformed_name.split("__", 1)[-1]
+
+        matched_feature = None
+
+        for original_feature in sorted(
+            feature_columns,
+            key=len,
+            reverse=True
+        ):
+            if (
+                clean_name == original_feature
+                or clean_name.startswith(
+                    f"{original_feature}_"
+                )
+            ):
+                matched_feature = original_feature
+                break
+
+        if matched_feature is not None:
+            original_feature_groups.setdefault(
+                matched_feature,
+                []
+            ).append(feature_index)
+
+    return {
+        "model_pipeline": model_pipeline,
+        "label_encoder": label_encoder,
+        "feature_columns": feature_columns,
+        "bridge_course_mapping": bridge_course_mapping,
+        "score_range_order": artifact[
+            "score_range_order"
+        ],
+        "digital_skill_order": artifact[
+            "digital_skill_order"
+        ],
+        "shap_background_profiles":
+            shap_background_profiles,
+        "shap_explainer": shap_explainer,
+        "transformed_feature_names":
+            transformed_feature_names,
+        "original_feature_groups":
+            original_feature_groups,
+        "metadata": metadata,
+    }
+
+
 ARTIFACT = load_model_artifact()
-MODEL = ARTIFACT["model"]
+
+MODEL = ARTIFACT["model_pipeline"]
 LABEL_ENCODER = ARTIFACT["label_encoder"]
-MODEL_INPUT_FEATURES = ARTIFACT["input_features"]
-PROGRAM_CATEGORY_TO_BRIDGE_COURSE = ARTIFACT["bridge_course_map"]
-PROGRAM_CATEGORY_TO_ALTERNATIVE_PATHWAY = ARTIFACT["alternative_pathway_map"]
+MODEL_INPUT_FEATURES = ARTIFACT["feature_columns"]
+
+MODEL_BROAD_CATEGORY_TO_BRIDGE_COURSE = ARTIFACT[
+    "bridge_course_mapping"
+]
+
+# Exact program-level bridge courses already defined above.
+PROGRAM_CATEGORY_TO_BRIDGE_COURSE = dict(
+    DEFAULT_PROGRAM_CATEGORY_TO_BRIDGE_COURSE
+)
+
+SHAP_EXPLAINER = ARTIFACT["shap_explainer"]
+
+TRANSFORMED_FEATURE_NAMES = ARTIFACT[
+    "transformed_feature_names"
+]
+
+ORIGINAL_FEATURE_GROUPS = ARTIFACT[
+    "original_feature_groups"
+]
+
+MODEL_METADATA = ARTIFACT["metadata"]
+
+# Alternative pathways aligned with the 16 final model categories
+PROGRAM_CATEGORY_TO_ALTERNATIVE_PATHWAY = {
+    "Medicine and Surgery":
+        "Biomedical Laboratory Sciences, Nursing and Midwifery, "
+        "Pharmacy, or additional science preparation.",
+
+    "Nursing and Midwifery":
+        "Medicine and Surgery, Biomedical Laboratory Sciences, "
+        "community health, or health-science preparation.",
+
+    "Pharmacy and Pharmaceutical Sciences":
+        "Biomedical Laboratory Sciences, Biotechnology, "
+        "Medicine, or chemistry-focused preparation.",
+
+    "Biomedical Laboratory Sciences":
+        "Biotechnology, Pharmacy, Nursing, "
+        "or laboratory-skills preparation.",
+
+    "Biotechnology and Applied Biosciences":
+        "Biomedical Laboratory Sciences, Agriculture, "
+        "Environmental Studies, or laboratory preparation.",
+
+    "Data Science, Statistics and Analytics":
+        "Computing and Information Technology, Economics, "
+        "or mathematics and statistics preparation.",
+
+    "Computing, Software and Information Technology":
+        "Data Science and Analytics, Engineering Systems, "
+        "or programming and digital-skills preparation.",
+
+    "Engineering, Construction and Technical Systems":
+        "Computing and Information Technology, Environmental Studies, "
+        "or mathematics, physics and technical-drawing preparation.",
+
+    "Business, Finance and Economics":
+        "Law and Governance, Data Science and Analytics, "
+        "or business and financial-skills preparation.",
+
+    "Law, Governance and International Relations":
+        "Business and Economics, Social Sciences, "
+        "or academic-writing and governance preparation.",
+
+    "Social Sciences, Psychology and Community Development":
+        "Education, Law and Governance, "
+        "or research-methods and communication preparation.",
+
+    "Education and Teacher Training":
+        "Languages and Communication, Social Sciences, "
+        "or teaching-methods preparation.",
+
+    "Languages, Communication and Media":
+        "Education, Law and International Relations, "
+        "or communication and academic-writing preparation.",
+
+    "Tourism and Hospitality Management":
+        "Business and Management, Languages and Communication, "
+        "or customer-service and hospitality preparation.",
+
+    "Agriculture, Food and Environmental Studies":
+        "Engineering and Technical Systems, Biotechnology, "
+        "or environmental and agricultural-skills preparation.",
+
+    "Creative Arts, Fashion and Digital Design":
+        "Languages, Communication and Media, Computing, "
+        "or portfolio and digital-design preparation."
+}
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -508,236 +695,857 @@ def get_program_area(program_name):
     return "General Academic Pathway"
 
 
-def normalize_program_category(predicted_program):
-    """Converts older exact degree outputs into the final program categories used in the notebook."""
-    program = str(predicted_program).strip()
-    text = program.lower()
+MODEL_STREAM_OR_TRADE_MAP = {
+    "Arts and Humanities": "General Arts",
+    "Languages": "Language Stream",
+    "Stream 1": "Stream 1",
+    "Stream 2": "Stream 2",
 
-    if program in PROGRAM_CATEGORY_TO_BRIDGE_COURSE:
-        return program
+    "Software Development": "Software Development",
+    "Networking and Internet Technologies":
+        "Networking and Telecommunication",
+    "Computer Systems and Architecture":
+        "Networking and Telecommunication",
+    "Multimedia Production":
+        "Multimedia and Digital Design",
+    "Software Programming and Embedded Systems":
+        "Software Development",
 
-    mapping_checks = [
-        (["tourism", "travel"], "Tourism and Travel Management"),
-        (["food and beverage"], "Hospitality Management and Food and Beverage Services"),
-        (["hospitality", "hotel", "culinary"], "Hospitality Management and Culinary Arts"),
-        (["software", "application development", "programming"], "Software Engineering and Application Development"),
-        (["network", "cyber", "security"], "Information Technology, Networking and Information Security"),
-        (["computer science", "information systems"], "Computer Science and Information Systems"),
-        (["data", "analytics", "machine learning", "ai"], "Data Science and Analytics"),
-        (["statistics", "applied mathematics"], "Statistics and Applied Mathematics"),
-        (["accounting"], "Accounting and Finance"),
-        (["finance", "banking"], "Finance and Banking"),
-        (["economics"], "Economics and Development Finance"),
-        (["business", "management", "entrepreneurship"], "Business Administration and Management"),
-        (["civil", "construction", "building", "road", "public works"], "Civil Engineering and Construction Technology"),
-        (["plumbing", "water", "sanitation"], "Water, Sanitation and Building Services Technology"),
-        (["electrical", "power", "energy"], "Electrical Engineering and Power Systems"),
-        (["mechanical", "manufacturing", "automotive", "automobile"], "Mechanical and Manufacturing Engineering"),
-        (["welding", "fabrication"], "Mechanical Fabrication and Welding Technology"),
-        (["medicine", "surgery", "doctor", "medical"], "Medicine and Surgery"),
-        (["nursing", "midwifery"], "Nursing and Midwifery"),
-        (["pharmacy", "pharmaceutical"], "Pharmacy and Pharmaceutical Sciences"),
-        (["biomedical", "laboratory"], "Biomedical Laboratory Sciences"),
-        (["biotechnology", "bioscience"], "Biotechnology and Applied Biosciences"),
-        (["law", "legal"], "Law and Legal Studies"),
-        (["public administration", "governance"], "Public Administration and Governance"),
-        (["international relations", "diplomacy"], "International Relations and Diplomacy"),
-        (["psychology", "counselling", "counseling"], "Psychology and Counselling Studies"),
-        (["sociology", "social sciences"], "Sociology and Social Sciences"),
-        (["social work"], "Social Work and Community Development"),
-        (["development studies", "community development"], "Development Studies and Community Development"),
-        (["translation", "interpretation"], "Translation and Interpretation"),
-        (["english", "literature", "language"], "English, Literature and Language Studies"),
-        (["journalism", "media"], "Journalism and Media Studies"),
-        (["communication", "public relations"], "Communication and Public Relations"),
-        (["fashion", "garment", "tailoring"], "Fashion Design and Garment Production"),
-        (["multimedia", "graphic", "digital media"], "Multimedia, Graphic Design and Digital Media Production"),
-        (["crop", "agribusiness", "agriculture"], "Crop Science and Agribusiness"),
-        (["food science", "food processing", "nutrition"], "Food Science and Processing Technology"),
-        (["environment", "sustainability"], "Environmental Science and Sustainability"),
-        (["geography", "gis"], "Geography, GIS and Environmental Planning"),
+    "Building Construction": "Masonry / Construction",
+    "Public Works / Road Construction":
+        "Masonry / Construction",
+    "Plumbing Technology": "Domestic Plumbing / Water",
+    "Land Surveying": "Masonry / Construction",
+    "Interior Design / Painting and Decoration":
+        "Masonry / Construction",
+
+    "Culinary Arts": "Culinary Arts / Front Office",
+    "Food and Beverage Operations":
+        "Culinary Arts / Front Office",
+    "Front Office and Housekeeping Operations":
+        "Culinary Arts / Front Office",
+    "Tourism": "Culinary Arts / Front Office",
+
+    "Electrical Technology / Electrical Installation":
+        "Electrical Technology",
+    "Industrial Electricity": "Electrical Technology",
+    "Renewable Energy Technology": "Electrical Technology",
+    "Electronics and Telecommunication":
+        "Networking and Telecommunication",
+
+    "Automobile Technology / Automobile Mechanic":
+        "Welding / Mechanical",
+    "Auto Electricity and Electronic Systems":
+        "Welding / Mechanical",
+    "Manufacturing and Production Technology":
+        "Welding / Mechanical",
+    "Welding and Fabrication": "Welding / Mechanical",
+
+    "Crop Production": "Crop Production / Animal Health",
+    "Animal Health / Livestock Farming":
+        "Crop Production / Animal Health",
+    "Food Processing": "Food Processing",
+    "Forestry and Wood Technology / Carpentry":
+        "Masonry / Construction",
+
+    "Accounting": "Accountancy",
+    "Fashion Design and Tailoring / Garment Making":
+        "Tailoring / Fashion Design",
+    "Fine and Plastic Arts":
+        "Multimedia and Digital Design",
+    "Hairdressing and Beauty Therapy / Cosmetology":
+        "Tailoring / Fashion Design",
+}
+
+
+MODEL_INTEREST_AREA_MAP = {
+    "Agriculture, Food Processing, and Environment":
+        "Technical Trades",
+    "Arts, Media, and Creative Industries":
+        "Humanities & Business",
+    "Business Management and Entrepreneurship":
+        "Humanities & Business",
+    "Communication, Marketing, and Public Relations":
+        "Languages & Communications",
+    "Construction and Technical Services":
+        "Technical Trades",
+    "Cybersecurity": "STEM Fields",
+    "Data Science, AI, and Machine Learning":
+        "STEM Fields",
+    "Education": "Humanities & Business",
+    "Finance, Accounting, and Banking":
+        "Humanities & Business",
+    "Hospitality, Tourism, and Service Sector":
+        "Technical Trades",
+    "International Relations and Diplomacy":
+        "Languages & Communications",
+    "Languages, Translation, and Interpretation":
+        "Languages & Communications",
+    "Law, Governance, and Public Administration":
+        "Humanities & Business",
+    "Manufacturing and Industrial Production":
+        "Technical Trades",
+    "Medicine and Health Sciences": "STEM Fields",
+    "Multimedia and Digital Content Production":
+        "Languages & Communications",
+    "Networking and Cloud Infrastructure":
+        "STEM Fields",
+    "Psychology, Counseling, and Social Sciences":
+        "Humanities & Business",
+    "Science, Engineering, and Mathematics":
+        "STEM Fields",
+    "Software Engineering and Development":
+        "STEM Fields",
+    "Transport and Logistics": "Technical Trades",
+    "UI/UX Design and Digital Product Design":
+        "Languages & Communications",
+}
+
+
+MODEL_CAREER_CLUSTER_MAP = {
+    "Medicine and Surgery": "Medicine & Health",
+    "Nursing and Midwifery": "Medicine & Health",
+    "Pharmacy and Pharmaceutical Sciences":
+        "Medicine & Health",
+    "Biomedical Laboratory Sciences":
+        "Medicine & Health",
+    "Biotechnology and Applied Biosciences":
+        "Research and Basic Sciences",
+
+    "Civil Engineering and Construction Technology":
+        "Engineering and Technology",
+    "Electrical Engineering and Power Systems":
+        "Engineering and Technology",
+    "Electrical Technology and Power Systems":
+        "Engineering and Infrastructure",
+    "Mechanical and Manufacturing Engineering":
+        "Engineering and Infrastructure",
+    "Mechanical Fabrication and Welding Technology":
+        "Engineering and Infrastructure",
+    "Water, Sanitation and Building Services Technology":
+        "Engineering and Infrastructure",
+
+    "Data Science and Analytics": "Technology and Data",
+    "Statistics and Applied Mathematics":
+        "Research and Basic Sciences",
+    "Computer Science and Information Systems":
+        "Technology and Data",
+    "Software Engineering and Application Development":
+        "Technology and Data",
+    "Information Technology, Networking and Information Security":
+        "Information and Communication Technology (ICT)",
+    "Information Technology and Systems Administration":
+        "Information and Communication Technology (ICT)",
+    "Computer Engineering and Embedded Systems":
+        "Information and Communication Technology (ICT)",
+
+    "Finance and Banking": "Business & Finance",
+    "Accounting and Finance": "Business & Finance",
+    "Economics and Development Finance":
+        "Business & Finance",
+    "Business Administration and Management":
+        "Business & Finance",
+
+    "Geography, GIS and Environmental Planning":
+        "Tourism & Environment",
+    "Urban and Regional Planning":
+        "Tourism & Environment",
+    "Crop Science and Agribusiness":
+        "Agriculture and Food Processing",
+    "Crop Production and Agribusiness":
+        "Agriculture and Food Processing",
+    "Food Science and Processing Technology":
+        "Agriculture and Food Processing",
+    "Environmental Science and Sustainability":
+        "Tourism & Environment",
+
+    "Public Administration and Governance":
+        "Law & Governance",
+    "Law and Legal Studies": "Law & Governance",
+    "International Relations and Diplomacy":
+        "International Relations",
+
+    "Psychology and Counselling Studies":
+        "Social Sciences",
+    "Sociology and Social Sciences":
+        "Social Sciences",
+    "Social Work and Community Development":
+        "Social Sciences",
+    "Development Studies and Community Development":
+        "Social Sciences",
+
+    "Education in Arts and Humanities": "Education",
+    "Education in Languages": "Education",
+
+    "Translation and Interpretation":
+        "International Relations",
+    "English, Literature and Language Studies":
+        "Media & Communication",
+    "Journalism and Media Studies":
+        "Media & Communication",
+    "Communication and Public Relations":
+        "Media & Communication",
+
+    "Hospitality Management and Culinary Arts":
+        "Hospitality, Tourism, and Service Sector",
+    "Hospitality Management and Food and Beverage Services":
+        "Hospitality, Tourism, and Service Sector",
+    "Hospitality Management and Room Division":
+        "Hospitality, Tourism, and Service Sector",
+    "Tourism and Travel Management":
+        "Hospitality, Tourism, and Service Sector",
+
+    "Multimedia, Graphic Design and Digital Media Production":
+        "Creative Industries",
+    "Fashion Design and Garment Production":
+        "Business, Art, and Craft",
+}
+
+MODEL_BEST_SUBJECTS = {
+    "Biology",
+    "Chemistry",
+    "Economics",
+    "English",
+    "French",
+    "Geography",
+    "History",
+    "Kiswahili",
+    "Literature",
+    "Mathematics",
+    "Physics",
+    "Practical Workshop / Execution",
+    "Religious Studies",
+}
+
+MODEL_WEAKEST_SUBJECTS = {
+    "Academic Theory",
+    "Advanced Calculus",
+    "Biology",
+    "Chemistry",
+    "Geography",
+    "History",
+    "Kinyarwanda",
+    "Literature",
+    "Mathematics",
+    "Physics",
+    "Research Writing",
+}
+
+
+BROAD_CATEGORY_TO_SPECIFIC_PROGRAMS = {
+    "Agriculture, Food and Environmental Studies": [
+        "Crop Science and Agribusiness",
+        "Crop Production and Agribusiness",
+        "Food Science and Processing Technology",
+        "Environmental Science and Sustainability",
+        "Geography, GIS and Environmental Planning",
+        "Urban and Regional Planning",
+    ],
+    "Biomedical Laboratory Sciences": [
+        "Biomedical Laboratory Sciences",
+    ],
+    "Biotechnology and Applied Biosciences": [
+        "Biotechnology and Applied Biosciences",
+    ],
+    "Business, Finance and Economics": [
+        "Finance and Banking",
+        "Accounting and Finance",
+        "Economics and Development Finance",
+        "Business Administration and Management",
+    ],
+    "Computing, Software and Information Technology": [
+        "Computer Science and Information Systems",
+        "Software Engineering and Application Development",
+        "Information Technology, Networking and Information Security",
+        "Information Technology and Systems Administration",
+        "Computer Engineering and Embedded Systems",
+    ],
+    "Creative Arts, Fashion and Digital Design": [
+        "Multimedia, Graphic Design and Digital Media Production",
+        "Fashion Design and Garment Production",
+    ],
+    "Data Science, Statistics and Analytics": [
+        "Data Science and Analytics",
+        "Statistics and Applied Mathematics",
+    ],
+    "Education and Teacher Training": [
+        "Education in Arts and Humanities",
+        "Education in Languages",
+    ],
+    "Engineering, Construction and Technical Systems": [
+        "Civil Engineering and Construction Technology",
+        "Electrical Engineering and Power Systems",
+        "Electrical Technology and Power Systems",
+        "Mechanical and Manufacturing Engineering",
+        "Mechanical Fabrication and Welding Technology",
+        "Water, Sanitation and Building Services Technology",
+    ],
+    "Languages, Communication and Media": [
+        "Translation and Interpretation",
+        "English, Literature and Language Studies",
+        "Journalism and Media Studies",
+        "Communication and Public Relations",
+    ],
+    "Law, Governance and International Relations": [
+        "Public Administration and Governance",
+        "Law and Legal Studies",
+        "International Relations and Diplomacy",
+    ],
+    "Medicine and Surgery": [
+        "Medicine and Surgery",
+    ],
+    "Nursing and Midwifery": [
+        "Nursing and Midwifery",
+    ],
+    "Pharmacy and Pharmaceutical Sciences": [
+        "Pharmacy and Pharmaceutical Sciences",
+    ],
+    "Social Sciences, Psychology and Community Development": [
+        "Psychology and Counselling Studies",
+        "Sociology and Social Sciences",
+        "Social Work and Community Development",
+        "Development Studies and Community Development",
+    ],
+    "Tourism and Hospitality Management": [
+        "Hospitality Management and Culinary Arts",
+        "Hospitality Management and Food and Beverage Services",
+        "Hospitality Management and Room Division",
+        "Tourism and Travel Management",
+    ],
+}
+
+SPECIFIC_PROGRAM_TO_BROAD_CATEGORY = {
+    program: broad_category
+    for broad_category, programs in (
+        BROAD_CATEGORY_TO_SPECIFIC_PROGRAMS.items()
+    )
+    for program in programs
+}
+
+BROAD_CATEGORY_DEFAULT_PROGRAM = {
+    broad_category: programs[0]
+    for broad_category, programs in (
+        BROAD_CATEGORY_TO_SPECIFIC_PROGRAMS.items()
+    )
+}
+
+# These families allow the model's broad category and an explicitly selected
+# closely related program to work together without replacing the SVM decision.
+RELATED_BROAD_CATEGORY_FAMILIES = [
+    {
+        "Medicine and Surgery",
+        "Nursing and Midwifery",
+        "Pharmacy and Pharmaceutical Sciences",
+        "Biomedical Laboratory Sciences",
+        "Biotechnology and Applied Biosciences",
+    },
+    {
+        "Computing, Software and Information Technology",
+        "Data Science, Statistics and Analytics",
+        "Engineering, Construction and Technical Systems",
+    },
+    {
+        "Languages, Communication and Media",
+        "Creative Arts, Fashion and Digital Design",
+    },
+    {
+        "Law, Governance and International Relations",
+        "Social Sciences, Psychology and Community Development",
+        "Education and Teacher Training",
+    },
+]
+
+MODEL_BEST_SUBJECTS = {
+    "Biology",
+    "Chemistry",
+    "Economics",
+    "English",
+    "French",
+    "Geography",
+    "History",
+    "Kiswahili",
+    "Literature",
+    "Mathematics",
+    "Physics",
+    "Practical Workshop / Execution",
+    "Religious Studies",
+}
+
+MODEL_WEAKEST_SUBJECTS = {
+    "Academic Theory",
+    "Advanced Calculus",
+    "Biology",
+    "Chemistry",
+    "Geography",
+    "History",
+    "Kinyarwanda",
+    "Literature",
+    "Mathematics",
+    "Physics",
+    "Research Writing",
+}
+
+FEATURE_DISPLAY_NAMES = {
+    "EducationType": "education type",
+    "Pathway": "academic pathway",
+    "Stream_or_Trade": "stream or TVET trade",
+    "BestSubject": "strongest subject or competency",
+    "WeakestSubject": "subject or competency needing support",
+    "InterestArea": "interest area",
+    "AverageScoreRange": "average score range",
+    "DigitalSkillLevel": "digital skill level",
+    "CareerCluster": "career direction",
+}
+
+
+def broad_categories_are_related(first_category, second_category):
+    """Return True when two broad categories belong to one related family."""
+
+    if first_category == second_category:
+        return True
+
+    return any(
+        first_category in family and second_category in family
+        for family in RELATED_BROAD_CATEGORY_FAMILIES
+    )
+
+
+def normalize_model_subject(value, column_name, education_type):
+    """Translate dashboard subject labels into the model vocabulary."""
+
+    value = str(value).strip()
+
+    if education_type == "TVET":
+        return (
+            "Practical Workshop / Execution"
+            if column_name == "BestSubject"
+            else "Academic Theory"
+        )
+
+    subject_map = {
+        "Entrepreneurship": "Economics",
+        "Psychology": "Literature",
+        "Kinyarwanda": (
+            "Kinyarwanda"
+            if column_name == "WeakestSubject"
+            else "English"
+        ),
+    }
+
+    value = subject_map.get(value, value)
+
+    if column_name == "BestSubject":
+        return (
+            value
+            if value in MODEL_BEST_SUBJECTS
+            else "Mathematics"
+        )
+
+    return (
+        value
+        if value in MODEL_WEAKEST_SUBJECTS
+        else "Research Writing"
+    )
+
+
+def prepare_profile_for_model(student_profile):
+    """
+    Translate the user-facing profile into the exact vocabulary used
+    during SVM training. The original dashboard values remain unchanged.
+    """
+
+    profile = dict(student_profile)
+    education_type = str(
+        profile.get("EducationType", "General Education")
+    ).strip()
+    original_stream_or_trade = str(
+        profile.get("Stream_or_Trade", "")
+    ).strip()
+
+    if education_type == "TVET":
+        profile["Pathway"] = "TVET Route"
+        profile["Stream_or_Trade"] = (
+            MODEL_STREAM_OR_TRADE_MAP.get(
+                original_stream_or_trade,
+                "Welding / Mechanical",
+            )
+        )
+        profile["BestSubject"] = "Practical Workshop / Execution"
+        profile["WeakestSubject"] = "Academic Theory"
+        profile["InterestArea"] = "Technical Trades"
+
+        aligned_specific_program = (
+            TVET_TRADE_TO_CAREER_CLUSTER.get(
+                original_stream_or_trade,
+                profile.get("CareerCluster", ""),
+            )
+        )
+        profile["CareerCluster"] = (
+            MODEL_CAREER_CLUSTER_MAP.get(
+                aligned_specific_program,
+                "Engineering and Infrastructure",
+            )
+        )
+
+    else:
+        profile["Stream_or_Trade"] = (
+            MODEL_STREAM_OR_TRADE_MAP.get(
+                original_stream_or_trade,
+                original_stream_or_trade,
+            )
+        )
+        profile["InterestArea"] = (
+            MODEL_INTEREST_AREA_MAP.get(
+                str(profile.get("InterestArea", "")).strip(),
+                "Humanities & Business",
+            )
+        )
+        profile["CareerCluster"] = (
+            MODEL_CAREER_CLUSTER_MAP.get(
+                str(profile.get("CareerCluster", "")).strip(),
+                "Business & Finance",
+            )
+        )
+        profile["BestSubject"] = normalize_model_subject(
+            profile.get("BestSubject", ""),
+            "BestSubject",
+            education_type,
+        )
+        profile["WeakestSubject"] = normalize_model_subject(
+            profile.get("WeakestSubject", ""),
+            "WeakestSubject",
+            education_type,
+        )
+
+    return profile
+
+
+def prepare_student_dataframe(student_profile):
+    """Create the exact model input columns in the saved pipeline order."""
+
+    model_profile = prepare_profile_for_model(student_profile)
+    student_df = pd.DataFrame([model_profile])
+
+    missing_features = [
+        feature
+        for feature in MODEL_INPUT_FEATURES
+        if feature not in student_df.columns
     ]
 
-    for keywords, category in mapping_checks:
-        if any(word in text for word in keywords):
-            return category
+    if missing_features:
+        raise ValueError(
+            "The learner profile is missing required features: "
+            + ", ".join(missing_features)
+        )
 
-    return program
-
-
-def rule_based_program_recommendation(student_profile):
-    education_type = str(student_profile.get("EducationType", "")).lower()
-    pathway = str(student_profile.get("Pathway", "")).lower()
-    stream_or_trade = str(student_profile.get("Stream_or_Trade", "")).lower()
-    best_subject = str(student_profile.get("BestSubject", "")).lower()
-    weakest_subject = str(student_profile.get("WeakestSubject", "")).lower()
-    interest_area = str(student_profile.get("InterestArea", "")).lower()
-    career_cluster = str(student_profile.get("CareerCluster", "")).lower()
-    digital_skill = str(student_profile.get("DigitalSkillLevel", "")).lower()
-
-    combined = " ".join([education_type, pathway, stream_or_trade, best_subject, weakest_subject, interest_area, career_cluster, digital_skill])
-    combined = combined.replace("machine leraning", "machine learning").replace("machin learning", "machine learning").replace("data scince", "data science").replace("maths", "mathematics")
-
-    if has_term(combined, ["food and beverage"]):
-        return "Hospitality Management and Food and Beverage Services"
-    if has_term(combined, ["culinary"]):
-        return "Hospitality Management and Culinary Arts"
-    if has_term(combined, ["front office", "housekeeping", "room division"]):
-        return "Hospitality Management and Room Division"
-    if has_term(combined, ["tourism", "travel"]):
-        return "Tourism and Travel Management"
-    if has_term(combined, ["fashion", "garment", "tailoring", "textile"]):
-        return "Fashion Design and Garment Production"
-    if has_term(combined, ["multimedia", "graphic design", "digital media"]):
-        return "Multimedia, Graphic Design and Digital Media Production"
-    if has_term(combined, ["welding", "fabrication"]):
-        return "Mechanical Fabrication and Welding Technology"
-    if has_term(combined, ["plumbing", "water", "sanitation"]):
-        return "Water, Sanitation and Building Services Technology"
-    if has_term(combined, ["construction", "road", "public works", "building", "interior", "painting", "decoration", "civil"]):
-        return "Civil Engineering and Construction Technology"
-
-    if has_term(combined, ["nursing"]):
-        return "Nursing and Midwifery"
-    if has_term(combined, ["medicine", "doctor", "medical"]):
-        if has_term(best_subject, ["chemistry", "biology"]) or "mathematics and sciences" in pathway:
-            return "Medicine and Surgery"
-    if has_term(combined, ["pharmacy", "pharmaceutical"]):
-        return "Pharmacy and Pharmaceutical Sciences"
-    if has_term(combined, ["biomedical", "laboratory"]):
-        return "Biomedical Laboratory Sciences"
-
-    if has_term(combined, ["machine learning", "artificial intelligence", "ai", "data science", "data analytics", "analytics"]):
-        return "Data Science and Analytics"
-    if has_term(combined, ["statistics", "applied mathematics"]):
-        return "Statistics and Applied Mathematics"
-    if has_term(combined, ["software", "programming", "application development", "web development"]):
-        return "Software Engineering and Application Development"
-    if has_term(combined, ["computer science", "information systems"]):
-        return "Computer Science and Information Systems"
-    if has_term(combined, ["network", "cyber", "security"]):
-        return "Information Technology, Networking and Information Security"
-    if has_term(combined, ["system administration", "it support"]):
-        return "Information Technology and Systems Administration"
-    if has_term(combined, ["computer engineering", "embedded", "electronics"]):
-        return "Computer Engineering and Embedded Systems"
-
-    if has_term(combined, ["finance", "banking"]):
-        return "Finance and Banking"
-    if has_term(combined, ["accounting"]):
-        return "Accounting and Finance"
-    if has_term(combined, ["economics", "development finance"]):
-        return "Economics and Development Finance"
-    if has_term(combined, ["business", "management", "entrepreneurship"]):
-        return "Business Administration and Management"
-
-    if has_term(combined, ["electrical installation"]):
-        return "Electrical Technology and Power Systems"
-    if has_term(combined, ["electrical", "power", "energy"]):
-        return "Electrical Engineering and Power Systems"
-    if has_term(combined, ["mechanical", "manufacturing", "automotive", "automobile"]):
-        return "Mechanical and Manufacturing Engineering"
-
-    if has_term(combined, ["agriculture", "agribusiness", "crop", "livestock", "animal"]):
-        return "Crop Science and Agribusiness"
-    if has_term(combined, ["food science", "food processing", "nutrition"]):
-        return "Food Science and Processing Technology"
-    if has_term(combined, ["environment", "sustainability", "climate", "forestry"]):
-        return "Environmental Science and Sustainability"
-    if has_term(combined, ["gis", "geography", "surveying"]):
-        return "Geography, GIS and Environmental Planning"
-
-    if has_term(combined, ["law", "legal"]):
-        return "Law and Legal Studies"
-    if has_term(combined, ["governance", "public administration"]):
-        return "Public Administration and Governance"
-    if has_term(combined, ["international relations", "diplomacy"]):
-        return "International Relations and Diplomacy"
-    if has_term(combined, ["psychology", "counselling", "counseling"]):
-        return "Psychology and Counselling Studies"
-    if has_term(combined, ["sociology", "social sciences"]):
-        return "Sociology and Social Sciences"
-    if has_term(combined, ["social work", "community development"]):
-        return "Social Work and Community Development"
-    if has_term(combined, ["development studies"]):
-        return "Development Studies and Community Development"
-    if has_term(combined, ["translation", "interpretation"]):
-        return "Translation and Interpretation"
-    if has_term(combined, ["english", "literature", "language"]):
-        return "English, Literature and Language Studies"
-    if has_term(combined, ["journalism", "media studies"]):
-        return "Journalism and Media Studies"
-    if has_term(combined, ["communication", "public relations"]):
-        return "Communication and Public Relations"
-    if has_term(combined, ["education", "teaching", "teacher"]):
-        if has_term(combined, ["language"]):
-            return "Education in Languages"
-        return "Education in Arts and Humanities"
-
-    return None
+    return student_df[MODEL_INPUT_FEATURES].copy()
 
 
-def predict_with_model(student_profile):
-    student_df = pd.DataFrame([student_profile])
-    for col in MODEL_INPUT_FEATURES:
-        if col not in student_df.columns:
-            student_df[col] = "Unknown"
-    student_df = student_df[MODEL_INPUT_FEATURES]
+def format_course_list(courses):
+    """Convert a bridge-course list into natural, readable text."""
 
-    raw_prediction = MODEL.predict(student_df)[0]
+    if courses is None:
+        return "Academic Writing, Digital Literacy, and Study Skills"
 
-    # Handles either encoded numeric class, string class, or old multi-output prediction rows.
-    if isinstance(raw_prediction, str):
-        predicted = raw_prediction
-    elif hasattr(raw_prediction, "__len__") and not isinstance(raw_prediction, str):
-        predicted = raw_prediction[0]
+    if isinstance(courses, str):
+        return courses
+
+    courses = list(courses)
+
+    if not courses:
+        return "Academic Writing, Digital Literacy, and Study Skills"
+
+    if len(courses) == 1:
+        return courses[0]
+
+    if len(courses) == 2:
+        return f"{courses[0]} and {courses[1]}"
+
+    return ", ".join(courses[:-1]) + f", and {courses[-1]}"
+
+
+def get_model_ranking(student_profile):
+    """Return the SVM broad-category prediction and ranked decision scores."""
+
+    student_df = prepare_student_dataframe(student_profile)
+    predicted_class_id = int(MODEL.predict(student_df)[0])
+    predicted_broad_category = LABEL_ENCODER.inverse_transform(
+        [predicted_class_id]
+    )[0]
+
+    decision_scores = np.asarray(
+        MODEL.decision_function(student_df)[0]
+    )
+    ranked_class_ids = np.argsort(decision_scores)[::-1]
+    ranked_broad_categories = LABEL_ENCODER.inverse_transform(
+        ranked_class_ids
+    ).tolist()
+
+    return {
+        "student_df": student_df,
+        "predicted_class_id": predicted_class_id,
+        "predicted_broad_category": predicted_broad_category,
+        "decision_scores": decision_scores,
+        "ranked_class_ids": ranked_class_ids,
+        "ranked_broad_categories": ranked_broad_categories,
+    }
+
+
+def get_preferred_specific_program(student_profile):
+    """Read the learner's explicit program direction from the profile."""
+
+    if student_profile.get("EducationType") == "TVET":
+        return TVET_TRADE_TO_CAREER_CLUSTER.get(
+            student_profile.get("Stream_or_Trade"),
+            student_profile.get("CareerCluster"),
+        )
+
+    return student_profile.get("CareerCluster")
+
+
+def refine_specific_program(student_profile, model_ranking):
+    """
+    Refine the SVM broad field to a specific program without replacing
+    the model. A learner-selected program is used only when its broad field
+    is model-supported or closely related to the top SVM field.
+    """
+
+    predicted_broad_category = model_ranking[
+        "predicted_broad_category"
+    ]
+    ranked_broad_categories = model_ranking[
+        "ranked_broad_categories"
+    ]
+    preferred_program = get_preferred_specific_program(student_profile)
+    preferred_broad_category = (
+        SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(preferred_program)
+    )
+
+    if preferred_program in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY:
+        if (
+            preferred_broad_category in ranked_broad_categories[:3]
+            or broad_categories_are_related(
+                preferred_broad_category,
+                predicted_broad_category,
+            )
+        ):
+            return preferred_program
+
+    interest_area = student_profile.get("InterestArea")
+    interest_candidates = INTEREST_AREA_TO_CAREER_CLUSTERS.get(
+        interest_area,
+        [],
+    )
+
+    for candidate in interest_candidates:
+        candidate_broad_category = (
+            SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(candidate)
+        )
+        if candidate_broad_category == predicted_broad_category:
+            return candidate
+
+    return BROAD_CATEGORY_DEFAULT_PROGRAM.get(
+        predicted_broad_category,
+        preferred_program or predicted_broad_category,
+    )
+
+
+def get_program_alternative(program, model_ranking):
+    """Return a related alternative pathway for advisor discussion."""
+
+    if program in DEFAULT_ALTERNATIVE_PATHWAY:
+        return DEFAULT_ALTERNATIVE_PATHWAY[program]
+
+    for broad_category in model_ranking["ranked_broad_categories"][1:]:
+        alternative_program = BROAD_CATEGORY_DEFAULT_PROGRAM.get(
+            broad_category
+        )
+        if alternative_program and alternative_program != program:
+            return alternative_program
+
+    return "A related diploma, foundation, or advisor-recommended pathway."
+
+
+def get_grouped_shap_explanation(student_profile, model_ranking):
+    """Aggregate SHAP values back into the nine original model features."""
+
+    student_df = model_ranking["student_df"]
+    fitted_preprocessor = MODEL.named_steps["preprocessor"]
+    transformed_profile = fitted_preprocessor.transform(student_df)
+
+    if hasattr(transformed_profile, "toarray"):
+        transformed_profile = transformed_profile.toarray()
+
+    shap_result = SHAP_EXPLAINER(
+        np.asarray(transformed_profile)
+    )
+    shap_values = np.asarray(shap_result.values)
+    predicted_class_id = model_ranking["predicted_class_id"]
+
+    if shap_values.ndim == 3:
+        class_shap_values = shap_values[
+            0,
+            :,
+            predicted_class_id,
+        ]
+    elif shap_values.ndim == 2:
+        class_shap_values = shap_values[0]
     else:
-        predicted = raw_prediction
+        return []
 
-    if LABEL_ENCODER is not None:
-        try:
-            if not isinstance(predicted, str):
-                predicted = LABEL_ENCODER.inverse_transform([predicted])[0]
-        except Exception:
-            predicted = str(predicted)
+    model_profile = prepare_profile_for_model(student_profile)
+    explanation_rows = []
 
-    return normalize_program_category(predicted)
+    for feature in MODEL_INPUT_FEATURES:
+        encoded_indices = ORIGINAL_FEATURE_GROUPS.get(feature, [])
+        if not encoded_indices:
+            continue
+
+        contribution = float(
+            class_shap_values[encoded_indices].sum()
+        )
+        explanation_rows.append(
+            {
+                "feature": feature,
+                "display_name": FEATURE_DISPLAY_NAMES.get(
+                    feature,
+                    feature,
+                ),
+                "model_value": model_profile.get(feature, "Not recorded"),
+                "contribution": contribution,
+                "absolute_contribution": abs(contribution),
+            }
+        )
+
+    return sorted(
+        explanation_rows,
+        key=lambda row: row["absolute_contribution"],
+        reverse=True,
+    )
 
 
 def recommend_student(student_profile):
-    rule_category = rule_based_program_recommendation(student_profile)
-    if rule_category:
-        category = rule_category
-        source = "Rule-based eligibility filter + model-aligned mapping"
-    else:
-        category = predict_with_model(student_profile)
-        source = "Machine learning model"
+    """
+    Generate an ML-first hierarchical recommendation.
 
-    category = normalize_program_category(category)
-    bridge = PROGRAM_CATEGORY_TO_BRIDGE_COURSE.get(category, "Academic Writing, Study Skills, Digital Literacy, and Career Readiness")
-    alternative = PROGRAM_CATEGORY_TO_ALTERNATIVE_PATHWAY.get(category, DEFAULT_ALTERNATIVE_PATHWAY.get(category, "Related diploma, certificate, foundation, or advisor-recommended academic pathway."))
-    return category, bridge, alternative, source
+    The SVM ranks one of 16 broad fields. The learner's explicit career
+    direction or TVET trade then refines that model-supported field to a
+    specific program, after which the related bridge course is retrieved.
+    """
 
-def build_explanation(profile, program, bridge, alternative, source):
-    education_type = profile.get("EducationType", "the selected education route")
-    pathway = profile.get("Pathway", "the selected pathway")
-    stream_or_trade = profile.get("Stream_or_Trade", "the selected stream or trade")
-    best_subject = profile.get("BestSubject", "the learner’s strongest area")
-    weakest_subject = profile.get("WeakestSubject", "the area needing support")
-    interest_area = profile.get("InterestArea", "the selected interest area")
-    career_cluster = profile.get("CareerCluster", "the selected career direction")
+    model_ranking = get_model_ranking(student_profile)
+    recommended_program = refine_specific_program(
+        student_profile,
+        model_ranking,
+    )
+
+    bridge_courses = PROGRAM_CATEGORY_TO_BRIDGE_COURSE.get(
+        recommended_program
+    )
+
+    if bridge_courses is None:
+        bridge_courses = MODEL_BROAD_CATEGORY_TO_BRIDGE_COURSE.get(
+            model_ranking["predicted_broad_category"],
+            [
+                "Academic Writing",
+                "Digital Literacy",
+                "Study Skills",
+            ],
+        )
+
+    recommended_bridge_course = format_course_list(bridge_courses)
+    alternative_pathway = get_program_alternative(
+        recommended_program,
+        model_ranking,
+    )
+    recommendation_source = (
+        "Trained Support Vector Machine + profile-aligned program refinement"
+    )
 
     return (
-        f"Based on the learner’s profile, **{program}** is a suitable academic direction. "
-        f"The learner is under **{education_type}**, following **{pathway}**, with a focus on "
-        f"**{stream_or_trade}**. Their strength in **{best_subject}** supports this pathway, "
-        f"while **{weakest_subject}** shows where extra preparation may be helpful.\n\n"
-        f"The learner’s interest in **{interest_area}** and career direction toward "
-        f"**{career_cluster}** also make this recommendation relevant. To support readiness, "
-        f"the system suggests **{bridge}** as a bridge course before progressing further.\n\n"
+        recommended_program,
+        recommended_bridge_course,
+        alternative_pathway,
+        recommendation_source,
+    )
+
+
+def build_explanation(profile, program, bridge, alternative, source):
+    """Create a concise explanation grounded in the SVM and SHAP values."""
+
+    model_ranking = get_model_ranking(profile)
+    predicted_broad_category = model_ranking[
+        "predicted_broad_category"
+    ]
+    program_broad_category = SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(
+        program,
+        predicted_broad_category,
+    )
+    shap_rows = get_grouped_shap_explanation(
+        profile,
+        model_ranking,
+    )
+
+    most_influential = shap_rows[:3]
+    if most_influential:
+        influence_text = ", ".join(
+            f"**{row['display_name']}** ({row['model_value']})"
+            for row in most_influential
+        )
+    else:
+        influence_text = (
+            "the learner's pathway, stream or trade, interest area, "
+            "and career direction"
+        )
+
+    if program_broad_category == predicted_broad_category:
+        refinement_text = (
+            f"Within that model-ranked field, **{program}** was selected "
+            "as the most relevant specific direction."
+        )
+    elif broad_categories_are_related(
+        program_broad_category,
+        predicted_broad_category,
+    ):
+        refinement_text = (
+            f"The learner's selected direction, **{program}**, belongs to "
+            f"the closely related **{program_broad_category}** field and was "
+            "therefore used as the specific recommendation."
+        )
+    else:
+        refinement_text = (
+            f"The system refined the broad field to **{program}** using the "
+            "learner's selected interest and career direction."
+        )
+
+    score_range = profile.get("AverageScoreRange", "Not recorded")
+    readiness_sentence = ""
+    if score_range == "50–59%":
+        readiness_sentence = (
+            " Because the recorded score range is **50–59%**, the result "
+            "should be reviewed with an academic advisor and the suggested "
+            "bridge preparation should be completed before relying on it for "
+            "an admission decision."
+        )
+    elif score_range == "60–69%":
+        readiness_sentence = (
+            " The **60–69%** score range indicates that targeted preparation "
+            "may strengthen readiness for this direction."
+        )
+
+    return (
+        f"The trained Support Vector Machine first classified the learner's "
+        f"profile under **{predicted_broad_category}**. {refinement_text}\n\n"
+        f"The most influential model inputs for the broad-field decision were "
+        f"{influence_text}. These influences were calculated from the saved "
+        f"model using SHAP after translating the dashboard selections into the "
+        f"same vocabulary used during training.\n\n"
+        f"To strengthen readiness for **{program}**, the system recommends "
+        f"**{bridge}**.{readiness_sentence}\n\n"
         f"**Alternative pathway for advisor discussion:** {alternative}\n\n"
         f"**Recommendation source:** {source}."
     )
+
 
 def make_guidance_report(profile, program, bridge, alternative, source, explanation):
     return f"""# Rwanda Academic Guidance Report
@@ -1397,8 +2205,10 @@ with st.sidebar:
     st.markdown('<div class="sidebar-section-title">System Information</div>', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="sidebar-box">
-        <b>Model:</b> {ARTIFACT['model_name']}<br>
-        <b>Model file:</b> academic_pathway_model.joblib<br>
+        <b>Model:</b> {MODEL_METADATA['model_name']}<br>
+        <b>Model file:</b> academic_pathway_model_v2.joblib<br>
+        <b>Test accuracy:</b> {MODEL_METADATA['accuracy'] * 100:.2f}%<br>
+        <b>Macro F1:</b> {MODEL_METADATA['macro_f1'] * 100:.2f}%<br>
         <b>Dataset version:</b> 2026.06<br>
         <b>Use:</b> Advisory decision support
     </div>
@@ -1547,23 +2357,30 @@ elif selected_page == "Get Recommendation":
                 best_subject = st.selectbox("Strongest Course / Competency", courses, key="best_competency")
                 weakest_subject = st.selectbox("Course / Competency Needing Support", courses, key="weak_competency")
 
-                default_interest = TVET_TRADE_TO_INTEREST_AREA.get(stream_or_trade, "Science, Engineering, and Mathematics")
-                interest_options = [default_interest] + [x for x in RWANDA_INTEREST_AREAS if x != default_interest]
-                interest_area = st.selectbox(
-                    "Interest Area",
-                    interest_options,
-                    key="tvet_interest_area",
-                    help="A suggested interest area is selected from the TVET trade, but it can be changed if needed.",
+                default_interest = TVET_TRADE_TO_INTEREST_AREA.get(
+                    stream_or_trade,
+                    "Science, Engineering, and Mathematics",
+                )
+                default_career = TVET_TRADE_TO_CAREER_CLUSTER.get(
+                    stream_or_trade,
+                    "Business Administration and Management",
                 )
 
-                default_career = TVET_TRADE_TO_CAREER_CLUSTER.get(stream_or_trade, "Business Administration and Management")
-                career_options = [default_career] + [x for x in PROGRAM_CATEGORY_OPTIONS if x != default_career]
-                career_cluster = st.selectbox(
-                    "Career Cluster",
-                    career_options,
-                    key="tvet_career_cluster",
-                    help="A suggested career cluster is selected from the TVET trade, but it can be changed if needed.",
+                st.text_input(
+                    "Interest Area",
+                    value=default_interest,
+                    disabled=False,
+                    key=f"tvet_interest_{stream_or_trade}",
                 )
+                st.text_input(
+                    "Career Cluster",
+                    value=default_career,
+                    disabled=False,
+                    key=f"tvet_career_{stream_or_trade}",
+                )
+
+                interest_area = default_interest
+                career_cluster = default_career
 
             average_score_range = st.selectbox("Average Score Range", ["50–59%", "60–69%", "70–79%", "80–89%", "90–100%"], key="score_range")
             digital_skill_level = st.selectbox("Digital Skill Level", ["Beginner", "Intermediate", "Advanced"], key="digital_skill")
@@ -1599,7 +2416,7 @@ elif selected_page == "Get Recommendation":
                 result_card("Recommended Academic Program Category", recommended_program, "This category is produced from the learner profile and the notebook-aligned recommendation logic.", "green")
                 result_card("Recommended Bridge Course", recommended_bridge_course, "This bridge course is mapped directly from the recommended program category.", "blue")
                 result_card("Alternative Academic Pathway", alternative_pathway, "This provides a second route for discussion with an academic advisor.", "purple")
-                result_card("Recommendation Source", source, "The system shows whether the result came from the eligibility filter or the ML model.", "gold")
+                result_card("Recommendation Source", source, "The trained model ranks the broad field before the learner profile refines the specific program.", "gold")
 
                 st.markdown("### Explanation of the Recommendation")
                 st.markdown(explanation)
@@ -1626,8 +2443,8 @@ elif selected_page == "Get Recommendation":
                 )
             else:
                 result_card("Recommended Academic Program Category", "Awaiting learner profile", "Complete the form and click Generate Recommendation to view the suggested category.", "green")
-                result_card("Recommended Bridge Course", "Awaiting recommendation", "The bridge course will appear after the system processes the profile.", "blue")
-                result_card("Explainability Summary", "Awaiting profile", "The explanation will show the factors considered by the system.", "purple")
+                result_card("Recommended Bridge Course", "Awaiting recommendation", "These preparatory courses are aligned with the recommended academic program category.", "blue")
+                result_card("Explainability Summary", "Awaiting profile", "The explanation will show the model-ranked field and the profile inputs that most influenced it.", "purple")
 
 elif selected_page == "Advisor Dashboard":
     st.markdown('<div class="section-card"><div class="section-title">Advisor Dashboard</div><div class="section-body">This section summarizes prototype evaluation indicators for advisor review and stakeholder discussion.</div></div>', unsafe_allow_html=True)
