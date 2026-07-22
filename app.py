@@ -830,12 +830,20 @@ def get_general_education_interest_areas(pathway, stream_or_trade, best_subject,
     if pathway == "Mathematics and Sciences":
         suggested.update([
             "Science, Engineering, and Mathematics",
-            "Medicine and Health Sciences",
             "Data Science, AI, and Machine Learning",
             "Software Engineering and Development",
             "Construction and Technical Services",
             "Agriculture, Food Processing, and Environment",
         ])
+
+        # Stream 1 includes Biology and Chemistry, so health-science
+        # directions may be presented as direct guidance options.
+        if stream_or_trade == "Stream 1":
+            suggested.add("Medicine and Health Sciences")
+
+        # Stream 2 is based on Mathematics, Economics, Geography, and
+        # Physics. Health and laboratory programmes are therefore not
+        # presented as direct recommendations from this stream.
         if stream_or_trade == "Stream 2":
             suggested.update([
                 "Finance, Accounting, and Banking",
@@ -1238,6 +1246,80 @@ BROAD_CATEGORY_DEFAULT_PROGRAM = {
     )
 }
 
+# Direct-guidance restrictions used by the deployed prototype. Stream 2
+# contains Mathematics, Economics, Geography, and Physics rather than
+# Biology and Chemistry, so health and laboratory fields are not returned
+# as the main recommendation for this stream. They may still be discussed
+# with an advisor as longer-term transition goals.
+STREAM_2_BLOCKED_BROAD_CATEGORIES = {
+    "Medicine and Surgery",
+    "Nursing and Midwifery",
+    "Pharmacy and Pharmaceutical Sciences",
+    "Biomedical Laboratory Sciences",
+    "Biotechnology and Applied Biosciences",
+}
+
+
+def is_broad_category_eligible_for_profile(broad_category, student_profile):
+    """Return whether a broad field is suitable as a direct recommendation."""
+
+    if student_profile.get("EducationType") != "General Education":
+        return True
+
+    is_stream_2 = (
+        student_profile.get("Pathway") == "Mathematics and Sciences"
+        and student_profile.get("Stream_or_Trade") == "Stream 2"
+    )
+
+    if is_stream_2 and broad_category in STREAM_2_BLOCKED_BROAD_CATEGORIES:
+        return False
+
+    return True
+
+
+def is_program_eligible_for_profile(program, student_profile):
+    """Return whether a specific program may be the main recommendation."""
+
+    broad_category = SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(program)
+    if broad_category is None:
+        return True
+
+    return is_broad_category_eligible_for_profile(
+        broad_category,
+        student_profile,
+    )
+
+
+def get_general_education_career_options(
+    interest_area,
+    pathway,
+    stream_or_trade,
+):
+    """Return career options compatible with the selected GE route."""
+
+    options = INTEREST_AREA_TO_CAREER_CLUSTERS.get(
+        interest_area,
+        PROGRAM_CATEGORY_OPTIONS,
+    )
+
+    profile_context = {
+        "EducationType": "General Education",
+        "Pathway": pathway,
+        "Stream_or_Trade": stream_or_trade,
+    }
+
+    eligible_options = [
+        option
+        for option in options
+        if is_program_eligible_for_profile(option, profile_context)
+    ]
+
+    return eligible_options or [
+        option
+        for option in PROGRAM_CATEGORY_OPTIONS
+        if is_program_eligible_for_profile(option, profile_context)
+    ]
+
 # These families allow the model's broad category and an explicitly selected
 # closely related program to work together without replacing the SVM decision.
 RELATED_BROAD_CATEGORY_FAMILIES = [
@@ -1475,12 +1557,19 @@ def format_course_list(courses):
 
 
 def get_model_ranking(student_profile):
-    """Return the SVM broad-category prediction and ranked decision scores."""
+    """
+    Return the SVM category ranking and select the highest-ranked field
+    that is compatible with the learner's academic route.
+
+    The raw model prediction is retained for technical traceability, while
+    the selected class is used by recommendation refinement and SHAP so the
+    displayed guidance and explanation refer to the same eligible field.
+    """
 
     student_df = prepare_student_dataframe(student_profile)
-    predicted_class_id = int(MODEL.predict(student_df)[0])
-    predicted_broad_category = LABEL_ENCODER.inverse_transform(
-        [predicted_class_id]
+    raw_predicted_class_id = int(MODEL.predict(student_df)[0])
+    raw_predicted_broad_category = LABEL_ENCODER.inverse_transform(
+        [raw_predicted_class_id]
     )[0]
 
     decision_scores = np.asarray(
@@ -1491,8 +1580,27 @@ def get_model_ranking(student_profile):
         ranked_class_ids
     ).tolist()
 
+    selected_position = next(
+        (
+            index
+            for index, broad_category in enumerate(
+                ranked_broad_categories
+            )
+            if is_broad_category_eligible_for_profile(
+                broad_category,
+                student_profile,
+            )
+        ),
+        0,
+    )
+
+    predicted_class_id = int(ranked_class_ids[selected_position])
+    predicted_broad_category = ranked_broad_categories[selected_position]
+
     return {
         "student_df": student_df,
+        "raw_predicted_class_id": raw_predicted_class_id,
+        "raw_predicted_broad_category": raw_predicted_broad_category,
         "predicted_class_id": predicted_class_id,
         "predicted_broad_category": predicted_broad_category,
         "decision_scores": decision_scores,
@@ -1661,7 +1769,13 @@ def refine_specific_program(student_profile, model_ranking):
         )
     )
 
-    if preferred_program in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY:
+    if (
+        preferred_program in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY
+        and is_program_eligible_for_profile(
+            preferred_program,
+            student_profile,
+        )
+    ):
         if (
             preferred_broad_category
             in ranked_broad_categories[:3]
@@ -1693,12 +1807,31 @@ def refine_specific_program(student_profile, model_ranking):
         if (
             candidate_broad_category
             == predicted_broad_category
+            and is_program_eligible_for_profile(
+                candidate,
+                student_profile,
+            )
         ):
             return candidate
 
-    return BROAD_CATEGORY_DEFAULT_PROGRAM.get(
+    # When the raw SVM top class is incompatible with the learner's stream,
+    # keep the model-first design by selecting the highest-ranked compatible
+    # broad field rather than returning an unrelated or blocked programme.
+    selected_broad_category = next(
+        (
+            broad_category
+            for broad_category in ranked_broad_categories
+            if is_broad_category_eligible_for_profile(
+                broad_category,
+                student_profile,
+            )
+        ),
         predicted_broad_category,
-        preferred_program or predicted_broad_category,
+    )
+
+    return BROAD_CATEGORY_DEFAULT_PROGRAM.get(
+        selected_broad_category,
+        preferred_program or selected_broad_category,
     )
 
 
@@ -2950,8 +3083,16 @@ elif selected_page == "Get Recommendation":
                 weakest_subject = st.selectbox("Subject Needing Support", subjects, key="weakest_subject")
                 interest_options = get_general_education_interest_areas(pathway, stream_or_trade, best_subject, weakest_subject)
                 interest_area = st.selectbox("Interest Area", interest_options, key="interest_area")
-                career_options = INTEREST_AREA_TO_CAREER_CLUSTERS.get(interest_area, PROGRAM_CATEGORY_OPTIONS)
-                career_cluster = st.selectbox("Career Cluster", career_options, key="career_cluster")
+                career_options = get_general_education_career_options(
+                    interest_area,
+                    pathway,
+                    stream_or_trade,
+                )
+                career_cluster = st.selectbox(
+                    "Career Cluster",
+                    career_options,
+                    key="career_cluster",
+                )
             else:
                 pathway = "TVET Route"
                 tvet_sector = st.selectbox("TVET Sector", list(TVET_STRUCTURE.keys()), key="tvet_sector")
@@ -3094,9 +3235,9 @@ elif selected_page == "Get Recommendation":
 elif selected_page == "Advisor Dashboard":
     st.markdown('<div class="section-card"><div class="section-title">Advisor Dashboard</div><div class="section-body">This section summarizes prototype evaluation indicators for advisor review and stakeholder discussion.</div></div>', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
-    with c1: metric_card("Usefulness Rating", "4/5", "Prototype evaluation indicator", "content/star.svg", "gold")
-    with c2: metric_card("Explanation Clarity", "4/5", "Advisor-facing transparency", "content/message-square-text.svg", "blue")
-    with c3: metric_card("Usability Rating", "4/5", "Interface ease of use", "content/user-check.svg", "green")
+    with c1: metric_card("Usefulness Rating", "Not measured", "Awaiting formal evaluation", "content/star.svg", "gold")
+    with c2: metric_card("Explanation Clarity", "Not measured", "Awaiting formal evaluation", "content/message-square-text.svg", "blue")
+    with c3: metric_card("Usability Rating", "Not measured", "Awaiting formal evaluation", "content/user-check.svg", "green")
     with c4: metric_card("Feedback Collection", "Active", "Stored in feedback_responses.csv", "content/clipboard-check.svg", "purple")
     st.markdown('<div class="info-box"><b>Advisor note:</b> This dashboard is for prototype monitoring and presentation. It does not represent official national analytics.</div>', unsafe_allow_html=True)
 
@@ -3105,11 +3246,11 @@ elif selected_page == "Methodology":
         METHODOLOGY_PHOTO,
         "System Methodology",
         "How the System Works",
-        "The system follows the hybrid architecture described in the research proposal: learner profile input, rule-based eligibility filtering, machine learning prediction, bridge-course mapping, alternative pathway suggestion, explainability, and feedback collection.",
+        "The system follows an ML-first guidance architecture: learner profile input, machine learning ranking of broad academic fields, pathway-aware refinement, bridge-course mapping, alternative pathway guidance, SHAP-supported explainability, and feedback collection.",
     )
     c1, c2, c3 = st.columns(3)
     with c1: icon_card("Input Features", "Education Type, Pathway, Stream or TVET Trade, Strongest Subject, Weakest Subject, Interest Area, Average Score Range, Digital Skill Level, and Career Cluster.", "content/file-text.svg")
-    with c2: icon_card("Prediction Layer", "The saved model predicts a recommended academic program category when a direct eligibility rule is not enough.", "workflow/ml-prediction.svg")
+    with c2: icon_card("Prediction Layer", "The saved SVM ranks broad academic program categories first. The guidance layer then refines the result using the learner's academic pathway or TVET trade.", "workflow/ml-prediction.svg")
     with c3: icon_card("Bridge Mapping", "The bridge course is mapped from the recommended program category to keep the output consistent with the training notebook.", "workflow/bridge-mapping.svg")
     c4, c5 = st.columns(2)
     with c4: icon_card("Explainability", "The explanation summarizes how the learner profile connects to the recommendation.", "content/message-square-text.svg")
