@@ -4,4 +4,3 @@ numpy
 joblib
 scikit-learn==1.6.1
 openpyxl
-shap==0.50.0

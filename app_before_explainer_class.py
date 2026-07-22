@@ -1953,186 +1953,6 @@ def recommend_student(student_profile):
     ).as_tuple()
 
 
-class RecommendationExplainer:
-    """
-    Generate learner-friendly explanations using
-    genuine SHAP-supported model influences.
-
-    The class separates explanation responsibilities
-    from the Streamlit user interface.
-    """
-
-    def build(
-        self,
-        profile,
-        program,
-        bridge,
-        alternative,
-        source,
-    ):
-        """Create a clear explanation for learners and academic advisors."""
-
-        def clean_value(value, fallback="Not specified"):
-            text = str(value or "").strip()
-            return text if text else fallback
-
-        education_type = clean_value(profile.get("EducationType"))
-        pathway = clean_value(profile.get("Pathway"))
-        stream_or_trade = clean_value(profile.get("Stream_or_Trade"))
-        strongest_area = clean_value(profile.get("BestSubject"))
-        support_area = clean_value(profile.get("WeakestSubject"))
-        interest_area = clean_value(profile.get("InterestArea"))
-        career_direction = clean_value(profile.get("CareerCluster"))
-        score_range = clean_value(profile.get("AverageScoreRange"))
-
-        model_ranking = get_model_ranking(profile)
-        explanation_rows = get_grouped_model_explanation(
-            profile,
-            model_ranking,
-        )
-        most_influential = explanation_rows[:3]
-
-        if most_influential:
-            influence_items = [
-                f"**{row['display_name']}**"
-                for row in most_influential
-            ]
-            if len(influence_items) == 1:
-                influence_list = influence_items[0]
-            elif len(influence_items) == 2:
-                influence_list = (
-                    f"{influence_items[0]} and {influence_items[1]}"
-                )
-            else:
-                influence_list = (
-                    f"{influence_items[0]}, {influence_items[1]}, "
-                    f"and {influence_items[2]}"
-                )
-
-            influence_reason = (
-                f"The parts of your profile that had the greatest influence "
-                f"on this guidance were your {influence_list}."
-            )
-        else:
-            influence_reason = (
-                "Your education background, strengths, interests, and career "
-                "direction were considered together when preparing this guidance."
-            )
-
-        if education_type == "TVET":
-            recommendation_reason = (
-                f"**{program}** is recommended because your TVET training in "
-                f"**{stream_or_trade}** provides a relevant foundation for this "
-                f"academic direction. Your strongest competency, "
-                f"**{strongest_area}**, also supports further study in this area."
-            )
-
-            expected_interest = clean_value(
-                TVET_TRADE_TO_INTEREST_AREA.get(stream_or_trade, ""),
-                "",
-            )
-            expected_career = clean_value(
-                TVET_TRADE_TO_CAREER_CLUSTER.get(stream_or_trade, ""),
-                "",
-            )
-
-            interest_is_different = (
-                expected_interest
-                and interest_area.casefold() != expected_interest.casefold()
-            )
-            career_is_different = (
-                expected_career
-                and career_direction.casefold() != expected_career.casefold()
-            )
-
-            if interest_is_different or career_is_different:
-                preference_reason = (
-                    f"You also selected **{interest_area}** as an interest area and "
-                    f"**{career_direction}** as a career direction. These choices "
-                    f"may differ from your current TVET trade. This recommendation "
-                    f"therefore gives greater attention to the training and practical "
-                    f"skills you already have. An academic advisor can help you plan "
-                    f"a transition when the new direction is your main goal."
-                )
-            else:
-                preference_reason = (
-                    f"Your interest in **{interest_area}** and your preferred career "
-                    f"direction, **{career_direction}**, are also consistent with "
-                    f"this recommendation."
-                )
-        else:
-            recommendation_reason = (
-                f"**{program}** is recommended because your background in "
-                f"**{pathway}**, particularly **{stream_or_trade}**, provides a "
-                f"relevant starting point for this direction. Your strongest subject, "
-                f"**{strongest_area}**, also supports the knowledge and skills "
-                f"commonly required in this field."
-            )
-            preference_reason = (
-                f"Your interest in **{interest_area}** and your preferred career "
-                f"direction, **{career_direction}**, were also considered when "
-                f"identifying this recommendation."
-            )
-
-        if (
-            strongest_area.casefold() == support_area.casefold()
-            and strongest_area != "Not specified"
-        ):
-            support_reason = (
-                f"You selected **{strongest_area}** as both your strongest area and "
-                f"the area where you need support. Review this choice to make sure "
-                f"your profile accurately reflects your learning needs."
-            )
-        else:
-            support_reason = (
-                f"You identified **{support_area}** as an area needing support. "
-                f"Strengthening this area may improve your overall preparation for "
-                f"further study."
-            )
-
-        preparation_reason = (
-            f"To prepare for **{program}**, the recommended bridge courses are "
-            f"**{bridge}**. These courses can help strengthen the knowledge and "
-            f"practical skills commonly needed in this program."
-        )
-
-        if score_range == "50–59%":
-            readiness_reason = (
-                f"Your average score range is **50–59%**. This recommendation should "
-                f"be treated as a possible pathway rather than a confirmed admission "
-                f"match. Completing the suggested bridge preparation and speaking "
-                f"with an academic advisor will be especially important."
-            )
-        elif score_range == "60–69%":
-            readiness_reason = (
-                f"Your average score range is **60–69%**. Additional preparation in "
-                f"the recommended bridge areas may strengthen your readiness and "
-                f"improve your options."
-            )
-        else:
-            readiness_reason = (
-                f"Your average score range of **{score_range}** provides a useful "
-                f"starting point for this direction. Official admission requirements "
-                f"should still be confirmed with the institution."
-            )
-
-        return (
-            f"{recommendation_reason}\n\n"
-            f"{preference_reason}\n\n"
-            f"{influence_reason}\n\n"
-            f"{support_reason}\n\n"
-            f"{preparation_reason}\n\n"
-            f"{readiness_reason}\n\n"
-            f"**Another pathway to consider:** {alternative}\n\n"
-            f"This recommendation is intended to support exploration and discussion "
-            f"with an academic advisor. It is not an official admission decision."
-        )
-
-
-
-EXPLAINER = RecommendationExplainer()
-
-
 def build_explanation(
     profile,
     program,
@@ -2140,15 +1960,164 @@ def build_explanation(
     alternative,
     source,
 ):
-    """Compatibility wrapper for the existing UI."""
+    """Create a clear explanation for learners and academic advisors."""
 
-    return EXPLAINER.build(
-        profile=profile,
-        program=program,
-        bridge=bridge,
-        alternative=alternative,
-        source=source,
+    def clean_value(value, fallback="Not specified"):
+        text = str(value or "").strip()
+        return text if text else fallback
+
+    education_type = clean_value(profile.get("EducationType"))
+    pathway = clean_value(profile.get("Pathway"))
+    stream_or_trade = clean_value(profile.get("Stream_or_Trade"))
+    strongest_area = clean_value(profile.get("BestSubject"))
+    support_area = clean_value(profile.get("WeakestSubject"))
+    interest_area = clean_value(profile.get("InterestArea"))
+    career_direction = clean_value(profile.get("CareerCluster"))
+    score_range = clean_value(profile.get("AverageScoreRange"))
+
+    model_ranking = get_model_ranking(profile)
+    explanation_rows = get_grouped_model_explanation(
+        profile,
+        model_ranking,
     )
+    most_influential = explanation_rows[:3]
+
+    if most_influential:
+        influence_items = [
+            f"**{row['display_name']}**"
+            for row in most_influential
+        ]
+        if len(influence_items) == 1:
+            influence_list = influence_items[0]
+        elif len(influence_items) == 2:
+            influence_list = (
+                f"{influence_items[0]} and {influence_items[1]}"
+            )
+        else:
+            influence_list = (
+                f"{influence_items[0]}, {influence_items[1]}, "
+                f"and {influence_items[2]}"
+            )
+
+        influence_reason = (
+            f"The parts of your profile that had the greatest influence "
+            f"on this guidance were your {influence_list}."
+        )
+    else:
+        influence_reason = (
+            "Your education background, strengths, interests, and career "
+            "direction were considered together when preparing this guidance."
+        )
+
+    if education_type == "TVET":
+        recommendation_reason = (
+            f"**{program}** is recommended because your TVET training in "
+            f"**{stream_or_trade}** provides a relevant foundation for this "
+            f"academic direction. Your strongest competency, "
+            f"**{strongest_area}**, also supports further study in this area."
+        )
+
+        expected_interest = clean_value(
+            TVET_TRADE_TO_INTEREST_AREA.get(stream_or_trade, ""),
+            "",
+        )
+        expected_career = clean_value(
+            TVET_TRADE_TO_CAREER_CLUSTER.get(stream_or_trade, ""),
+            "",
+        )
+
+        interest_is_different = (
+            expected_interest
+            and interest_area.casefold() != expected_interest.casefold()
+        )
+        career_is_different = (
+            expected_career
+            and career_direction.casefold() != expected_career.casefold()
+        )
+
+        if interest_is_different or career_is_different:
+            preference_reason = (
+                f"You also selected **{interest_area}** as an interest area and "
+                f"**{career_direction}** as a career direction. These choices "
+                f"may differ from your current TVET trade. This recommendation "
+                f"therefore gives greater attention to the training and practical "
+                f"skills you already have. An academic advisor can help you plan "
+                f"a transition when the new direction is your main goal."
+            )
+        else:
+            preference_reason = (
+                f"Your interest in **{interest_area}** and your preferred career "
+                f"direction, **{career_direction}**, are also consistent with "
+                f"this recommendation."
+            )
+    else:
+        recommendation_reason = (
+            f"**{program}** is recommended because your background in "
+            f"**{pathway}**, particularly **{stream_or_trade}**, provides a "
+            f"relevant starting point for this direction. Your strongest subject, "
+            f"**{strongest_area}**, also supports the knowledge and skills "
+            f"commonly required in this field."
+        )
+        preference_reason = (
+            f"Your interest in **{interest_area}** and your preferred career "
+            f"direction, **{career_direction}**, were also considered when "
+            f"identifying this recommendation."
+        )
+
+    if (
+        strongest_area.casefold() == support_area.casefold()
+        and strongest_area != "Not specified"
+    ):
+        support_reason = (
+            f"You selected **{strongest_area}** as both your strongest area and "
+            f"the area where you need support. Review this choice to make sure "
+            f"your profile accurately reflects your learning needs."
+        )
+    else:
+        support_reason = (
+            f"You identified **{support_area}** as an area needing support. "
+            f"Strengthening this area may improve your overall preparation for "
+            f"further study."
+        )
+
+    preparation_reason = (
+        f"To prepare for **{program}**, the recommended bridge courses are "
+        f"**{bridge}**. These courses can help strengthen the knowledge and "
+        f"practical skills commonly needed in this program."
+    )
+
+    if score_range == "50–59%":
+        readiness_reason = (
+            f"Your average score range is **50–59%**. This recommendation should "
+            f"be treated as a possible pathway rather than a confirmed admission "
+            f"match. Completing the suggested bridge preparation and speaking "
+            f"with an academic advisor will be especially important."
+        )
+    elif score_range == "60–69%":
+        readiness_reason = (
+            f"Your average score range is **60–69%**. Additional preparation in "
+            f"the recommended bridge areas may strengthen your readiness and "
+            f"improve your options."
+        )
+    else:
+        readiness_reason = (
+            f"Your average score range of **{score_range}** provides a useful "
+            f"starting point for this direction. Official admission requirements "
+            f"should still be confirmed with the institution."
+        )
+
+    return (
+        f"{recommendation_reason}\n\n"
+        f"{preference_reason}\n\n"
+        f"{influence_reason}\n\n"
+        f"{support_reason}\n\n"
+        f"{preparation_reason}\n\n"
+        f"{readiness_reason}\n\n"
+        f"**Another pathway to consider:** {alternative}\n\n"
+        f"This recommendation is intended to support exploration and discussion "
+        f"with an academic advisor. It is not an official admission decision."
+    )
+
 
 def make_guidance_report(profile, program, bridge, alternative, source, explanation):
     return f"""# Rwanda Academic Guidance Report
