@@ -1915,7 +1915,7 @@ def get_grouped_model_explanation(student_profile, model_ranking):
         )
 
         explanation_rows.append(
-            {+
+            {
                 "feature": feature,
                 "display_name": FEATURE_DISPLAY_NAMES.get(
                     feature,
