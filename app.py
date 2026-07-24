@@ -3015,15 +3015,15 @@ if selected_page == "Home":
 
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        metric_card("Survey Responses", "105", "Collected from students and advisors", "metrics/survey-responses.svg", "blue")
+        metric_card("Survey Responses", "114", "Collected from students and advisors", "metrics/survey-responses.svg", "blue")
     with c2:
-        metric_card("Program Recommendation Requested", "53.3%", "56 out of 105 respondents", "metrics/program-guidance.svg", "green")
+        metric_card("Program Recommendation Requested", "53.5%", "61 out of 114 respondents", "metrics/program-guidance.svg", "green")
     with c3:
-        metric_card("Career Guidance Requested", "55.2%", "58 out of 105 respondents", "metrics/career-guidance.svg", "gold")
+        metric_card("Career Guidance Requested", "51.8%", "59 out of 114 respondents", "metrics/career-guidance.svg", "gold")
     with c4:
-        metric_card("Willing to Use Bridge Courses", "88.6%", "93 out of 105 respondents", "metrics/bridge-course.svg", "purple")
+        metric_card("Willing to Use Bridge Courses", "86.8%", "99 out of 114 respondents", "metrics/bridge-course.svg", "purple")
     with c5:
-        metric_card("Willing to Test System", "76.2%", "80 out of 105 respondents", "metrics/system-testing.svg", "teal")
+        metric_card("open to alternative programs", "92.1%", "105 out of 105 respondents", "metrics/system-testing.svg", "teal")
 
     left_col, right_col = st.columns([2.2, 1], gap="medium")
 
