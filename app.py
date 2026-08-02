@@ -1945,7 +1945,9 @@ class RecommendationResult:
     bridge_courses: str
     alternative_pathway: str
     source: str
+    raw_predicted_broad_category: str
     predicted_broad_category: str
+    pathway_adjustment_applied: bool
 
     def as_tuple(self):
         """Maintain compatibility with the existing UI code."""
@@ -2059,14 +2061,26 @@ class AcademicPathwayRecommender:
             model_ranking,
         )
 
+        raw_predicted_broad_category = model_ranking[
+            "raw_predicted_broad_category"
+        ]
+        predicted_broad_category = model_ranking[
+            "predicted_broad_category"
+        ]
+
         return RecommendationResult(
             program=recommended_program,
             bridge_courses=recommended_bridge_course,
             alternative_pathway=alternative_pathway,
             source=self.source_label,
-            predicted_broad_category=model_ranking[
-                "predicted_broad_category"
-            ],
+            raw_predicted_broad_category=(
+                raw_predicted_broad_category
+            ),
+            predicted_broad_category=predicted_broad_category,
+            pathway_adjustment_applied=(
+                raw_predicted_broad_category
+                != predicted_broad_category
+            ),
         )
 
 
@@ -2083,7 +2097,7 @@ def recommend_student(student_profile):
 
     return RECOMMENDER.recommend(
         student_profile
-    ).as_tuple()
+    )
 
 
 class RecommendationExplainer:
@@ -2256,7 +2270,7 @@ class RecommendationExplainer:
             f"{support_reason}\n\n"
             f"{preparation_reason}\n\n"
             f"{readiness_reason}\n\n"
-            f"**Another pathway to consider:** {alternative}\n\n"
+            f"**Other academic programs to consider:** {alternative}\n\n"
             f"This recommendation is intended to support exploration and discussion "
             f"with an academic advisor. It is not an official admission decision."
         )
@@ -2302,7 +2316,7 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ## Recommendation Output
 - Recommended Academic Program Category: {program}
 - Recommended Bridge Course: {bridge}
-- Alternative Academic Pathway: {alternative}
+- Alternative Academic Programs: {alternative}
 - Recommendation Source: {source}
 
 ## Explanation
@@ -3157,15 +3171,74 @@ elif selected_page == "Get Recommendation":
 
                     profile = learner_profile.to_dict()
 
-                    recommended_program, recommended_bridge_course, alternative_pathway, source = recommend_student(
+                    recommendation_result = recommend_student(
                         learner_profile
+                    )
+
+                    recommended_program = (
+                        recommendation_result.program
+                    )
+                    recommended_bridge_course = (
+                        recommendation_result.bridge_courses
+                    )
+                    alternative_pathway = (
+                        recommendation_result.alternative_pathway
+                    )
+                    source = recommendation_result.source
+
+                    raw_model_category = (
+                        recommendation_result
+                        .raw_predicted_broad_category
+                    )
+                    reviewed_model_category = (
+                        recommendation_result
+                        .predicted_broad_category
+                    )
+                    pathway_adjustment_applied = (
+                        recommendation_result
+                        .pathway_adjustment_applied
                     )
                 except Exception as e:
                     st.error("The system could not process this learner profile. Please confirm that the saved model matches the dashboard input features.")
                     st.exception(e)
                     st.stop()
 
-                explanation = build_explanation(profile, recommended_program, recommended_bridge_course, alternative_pathway, source)
+                with st.expander(
+                    "How the recommendation was generated"
+                ):
+                    st.markdown(
+                        "**Direct SVM broad-category prediction:** "
+                        f"{raw_model_category}"
+                    )
+
+                    if pathway_adjustment_applied:
+                        st.warning(
+                            "Pathway review adjustment applied. "
+                            "The highest-ranked academically compatible "
+                            "category was: "
+                            f"{reviewed_model_category}"
+                        )
+                    else:
+                        st.success(
+                            "The pathway review retained the direct "
+                            "SVM prediction: "
+                            f"{reviewed_model_category}"
+                        )
+
+                    st.caption(
+                        "The trained SVM predicts a broad academic "
+                        "category. The guidance layer then reviews "
+                        "pathway or TVET compatibility before selecting "
+                        "a specific academic program."
+                    )
+
+                explanation = build_explanation(
+                    profile,
+                    recommended_program,
+                    recommended_bridge_course,
+                    alternative_pathway,
+                    source,
+                )
 
                 result_card(
                     "Recommended Academic Program",
@@ -3186,11 +3259,12 @@ elif selected_page == "Get Recommendation":
                     "blue",
                 )
                 result_card(
-                    "Alternative Academic Pathway",
+                    "Alternative Academic Programs",
                     alternative_pathway,
                     (
-                        "This is another related option to explore with an "
-                        "academic advisor."
+                         "These are other suitable academic programs the learner "
+                         "may consider if the primary recommendation does not match "
+                         "their interests or preferred career direction."
                     ),
                     "purple",
                 )
