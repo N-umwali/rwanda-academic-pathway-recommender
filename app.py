@@ -2191,10 +2191,12 @@ class RecommendationExplainer:
                 preference_reason = (
                     f"You also selected **{interest_area}** as an interest area and "
                     f"**{career_direction}** as a career direction. These choices "
-                    f"may differ from your current TVET trade. This recommendation "
-                    f"therefore gives greater attention to the training and practical "
-                    f"skills you already have. An academic advisor can help you plan "
-                    f"a transition when the new direction is your main goal."
+                    f"differ from the direction most directly associated with your "
+                    f"current TVET trade. Because the selected direction is supported "
+                    f"by the model ranking, this recommendation reflects your transition "
+                    f"goal. Your existing TVET background remains part of the guidance, "
+                    f"and an academic advisor can help identify any additional "
+                    f"preparation needed."
                 )
             else:
                 preference_reason = (
