@@ -3043,12 +3043,12 @@ if selected_page == "Home":
             '<div class="section-body">The system follows a simple, explainable guidance workflow.</div></div>'
         )
         WORKFLOW_STEPS = [
-            ("01", "Learner Profile", "Education type, pathway, strengths, interests, and career direction.", "workflow/learner-profile.svg"),
-            ("02", "Data Processing", "The profile is structured into the model's input features.", "workflow/data-processing.svg"),
-            ("03", "Eligibility Filter", "Strong TVET, subject, interest, and career signals are checked first.", "workflow/eligibility-filter.svg"),
-            ("04", "ML Prediction", "The saved model predicts a program category where needed.", "workflow/ml-prediction.svg"),
-            ("05", "Bridge Mapping", "The bridge course is mapped from the program category.", "workflow/bridge-mapping.svg"),
-            ("06", "Advisor Review", "The recommendation is explained for advisor discussion.", "workflow/advisor-review.svg"),
+            ("01", "Learner Profile", "Education type, pathway, strengths, interests, and career direction are recorded.", "workflow/learner-profile.svg"),
+            ("02", "Data Processing", "The profile is translated into the trained model's input format.", "workflow/data-processing.svg"),
+            ("03", "ML Category Ranking", "The trained model ranks broad academic categories from the learner's profile.", "workflow/ml-prediction.svg"),
+            ("04", "Pathway Compatibility Review", "The highest-ranked category compatible with the learner's education route is selected.", "workflow/eligibility-filter.svg"),
+            ("05", "Program and Bridge Mapping", "A specific program and relevant bridge courses are mapped from the selected category.", "workflow/bridge-mapping.svg"),
+            ("06", "Explainable Advisor Review", "The recommendation and its main influencing factors are presented for advisor discussion.", "workflow/advisor-review.svg"),
         ]
         _wf_parts = []
         for _i, (_num, _title, _body, _ic) in enumerate(WORKFLOW_STEPS):
