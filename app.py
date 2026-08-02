@@ -1346,36 +1346,6 @@ RELATED_BROAD_CATEGORY_FAMILIES = [
     },
 ]
 
-MODEL_BEST_SUBJECTS = {
-    "Biology",
-    "Chemistry",
-    "Economics",
-    "English",
-    "French",
-    "Geography",
-    "History",
-    "Kiswahili",
-    "Literature",
-    "Mathematics",
-    "Physics",
-    "Practical Workshop / Execution",
-    "Religious Studies",
-}
-
-MODEL_WEAKEST_SUBJECTS = {
-    "Academic Theory",
-    "Advanced Calculus",
-    "Biology",
-    "Chemistry",
-    "Geography",
-    "History",
-    "Kinyarwanda",
-    "Literature",
-    "Mathematics",
-    "Physics",
-    "Research Writing",
-}
-
 FEATURE_DISPLAY_NAMES = {
     "EducationType": "education type",
     "Pathway": "academic pathway",
