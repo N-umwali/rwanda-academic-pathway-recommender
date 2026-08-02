@@ -1465,18 +1465,19 @@ def prepare_profile_for_model(student_profile):
         profile["WeakestSubject"] = "Academic Theory"
         profile["InterestArea"] = "Technical Trades"
 
-        trade_aligned_program = (
-            TVET_TRADE_TO_CAREER_CLUSTER.get(
-                original_stream_or_trade,
-                "Mechanical and Manufacturing Engineering",
+        selected_career_program = str(
+            profile.get("CareerCluster", "")
+        ).strip()
+
+        if selected_career_program not in MODEL_CAREER_CLUSTER_MAP:
+            raise ValueError(
+                "The selected TVET career direction is not supported "
+                "by the trained model vocabulary: "
+                f"{selected_career_program}"
             )
-        )
 
         profile["CareerCluster"] = (
-            MODEL_CAREER_CLUSTER_MAP.get(
-                trade_aligned_program,
-                "Engineering and Infrastructure",
-            )
+            MODEL_CAREER_CLUSTER_MAP[selected_career_program]
         )
 
     else:
