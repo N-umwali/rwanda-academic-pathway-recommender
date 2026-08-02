@@ -3204,32 +3204,32 @@ elif selected_page == "Get Recommendation":
                     st.stop()
 
                 with st.expander(
-                    "How the recommendation was generated"
+                    "How this recommendation was prepared"
                 ):
                     st.markdown(
-                        "**Direct SVM broad-category prediction:** "
+                        "**Initial academic field identified:** "
                         f"{raw_model_category}"
                     )
 
                     if pathway_adjustment_applied:
-                        st.warning(
-                            "Pathway review adjustment applied. "
-                            "The highest-ranked academically compatible "
-                            "category was: "
+                        st.info(
+                            "After reviewing the learner’s academic "
+                            "pathway, the most suitable compatible field "
+                            "was identified as: "
                             f"{reviewed_model_category}"
                         )
                     else:
                         st.success(
-                            "The pathway review retained the direct "
-                            "SVM prediction: "
+                            "This academic field is consistent with the "
+                            "learner’s current pathway: "
                             f"{reviewed_model_category}"
                         )
 
                     st.caption(
-                        "The trained SVM predicts a broad academic "
-                        "category. The guidance layer then reviews "
-                        "pathway or TVET compatibility before selecting "
-                        "a specific academic program."
+                        "The system combines the learner’s academic "
+                        "profile with a trained machine-learning model "
+                        "and pathway compatibility checks before "
+                        "suggesting a specific academic program."
                     )
 
                 explanation = build_explanation(
