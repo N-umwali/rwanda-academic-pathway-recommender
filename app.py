@@ -1883,8 +1883,18 @@ def get_grouped_model_explanation(student_profile, model_ranking):
         return []
 
     explanation_rows = []
+    is_tvet = (
+        str(student_profile.get("EducationType", "")).strip()
+        == "TVET"
+    )
 
     for feature in MODEL_INPUT_FEATURES:
+        if is_tvet and feature in {
+            "BestSubject",
+            "WeakestSubject",
+        }:
+            continue
+
         encoded_indices = ORIGINAL_FEATURE_GROUPS.get(feature, [])
         if not encoded_indices:
             continue
@@ -2154,8 +2164,9 @@ class RecommendationExplainer:
             recommendation_reason = (
                 f"**{program}** is recommended because your TVET training in "
                 f"**{stream_or_trade}** provides a relevant foundation for this "
-                f"academic direction. Your strongest competency, "
-                f"**{strongest_area}**, also supports further study in this area."
+                f"academic direction. Your selected strongest competency, "
+                f"**{strongest_area}**, is retained to support preparation "
+                f"planning and discussion with an academic advisor."
             )
 
             expected_interest = clean_value(
