@@ -3032,7 +3032,7 @@ if selected_page == "Home":
     with c4:
         metric_card("Willing to Use Bridge Courses", "86.8%", "99 out of 114 respondents", "metrics/bridge-course.svg", "purple")
     with c5:
-        metric_card("open to alternative programs", "92.1%", "105 out of 105 respondents", "metrics/system-testing.svg", "teal")
+        metric_card("Open to Alternative Programs", "92.1%", "105 out of 114 respondents", "metrics/system-testing.svg", "teal")
 
     left_col, right_col = st.columns([2.2, 1], gap="medium")
 
