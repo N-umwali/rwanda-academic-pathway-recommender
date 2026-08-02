@@ -1669,9 +1669,10 @@ def refine_specific_program(student_profile, model_ranking):
     General Education profiles may use the learner-selected
     program when it is supported by the model.
 
-    TVET profiles remain grounded in the current trade.
-    A selected career may refine the main recommendation only
-    when it matches the specialisation aligned with that trade.
+    TVET profiles may use the learner-selected career when its
+    broad field is supported by the trained model. The current
+    trade remains a fallback when the selected direction is not
+    sufficiently supported by the model ranking.
     """
 
     predicted_broad_category = model_ranking[
@@ -1703,13 +1704,12 @@ def refine_specific_program(student_profile, model_ranking):
             "selected_broad_category"
         ]
 
-        # A learner-selected program may refine the result
-        # only when it matches the direct specialisation for
-        # the learner's existing TVET trade.
+        # Respect the learner-selected TVET career when the
+        # trained model supports its broad academic field.
         if (
-            alignment["same_specialisation"]
-            and selected_program
+            selected_program
             in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY
+            and selected_broad_category
             and (
                 selected_broad_category
                 in ranked_broad_categories[:3]
