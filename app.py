@@ -1463,7 +1463,20 @@ def prepare_profile_for_model(student_profile):
         )
         profile["BestSubject"] = "Practical Workshop / Execution"
         profile["WeakestSubject"] = "Academic Theory"
-        profile["InterestArea"] = "Technical Trades"
+        selected_interest_area = str(
+            profile.get("InterestArea", "")
+        ).strip()
+
+        if selected_interest_area not in MODEL_INTEREST_AREA_MAP:
+            raise ValueError(
+                "The selected TVET interest area is not supported "
+                "by the trained model vocabulary: "
+                f"{selected_interest_area}"
+            )
+
+        profile["InterestArea"] = (
+            MODEL_INTEREST_AREA_MAP[selected_interest_area]
+        )
 
         selected_career_program = str(
             profile.get("CareerCluster", "")
