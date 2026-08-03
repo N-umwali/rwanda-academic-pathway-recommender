@@ -221,7 +221,7 @@ DEFAULT_ALTERNATIVE_PATHWAY = {
     "Mechanical and Manufacturing Engineering": "Manufacturing Technology, Mechanical Fabrication, Automobile Technology, or technical drawing preparation.",
     "Mechanical Fabrication and Welding Technology": "Mechanical Engineering, Manufacturing Technology, or welding/fabrication certification pathways.",
     "Water, Sanitation and Building Services Technology": "Civil Engineering, Plumbing Technology, Environmental Health, or sanitation systems preparation.",
-    "Data Science and Analytics": "Software Engineering, Statistics, Information Systems, or Python/data-skills preparation.",
+    "Data Science and Analytics": "Software Engineering and Application Development, Statistics and Applied Mathematics, or Computer Science and Information Systems.",
     "Statistics and Applied Mathematics": "Data Science, Economics, Actuarial Studies, or statistics foundation preparation.",
     "Computer Science and Information Systems": "Software Engineering, Data Science, IT Systems, or programming foundation preparation.",
     "Software Engineering and Application Development": "Computer Science, Information Systems, Data Science, or software project certification.",
@@ -2151,8 +2151,10 @@ class RecommendationExplainer:
                 )
 
             influence_reason = (
-                f"The parts of your profile that had the greatest influence "
-                f"on this guidance were your {influence_list}."
+                f"Within the trained model, the profile factors with the greatest "
+                f"influence on the broad academic field ranking were your "
+                f"{influence_list}. The final program recommendation also considers "
+                f"your selected interest and career direction."
             )
         else:
             influence_reason = (
@@ -2160,15 +2162,9 @@ class RecommendationExplainer:
                 "direction were considered together when preparing this guidance."
             )
 
-        if education_type == "TVET":
-            recommendation_reason = (
-                f"**{program}** is recommended because your TVET training in "
-                f"**{stream_or_trade}** provides a relevant foundation for this "
-                f"academic direction. Your selected strongest competency, "
-                f"**{strongest_area}**, is retained to support preparation "
-                f"planning and discussion with an academic advisor."
-            )
+        is_tvet_transition = False
 
+        if education_type == "TVET":
             expected_interest = clean_value(
                 TVET_TRADE_TO_INTEREST_AREA.get(stream_or_trade, ""),
                 "",
@@ -2186,23 +2182,37 @@ class RecommendationExplainer:
                 expected_career
                 and career_direction.casefold() != expected_career.casefold()
             )
+            is_tvet_transition = bool(
+                interest_is_different or career_is_different
+            )
 
-            if interest_is_different or career_is_different:
+            if is_tvet_transition:
+                recommendation_reason = (
+                    f"**{program}** is recommended because you selected "
+                    f"**{interest_area}** as your interest area and "
+                    f"**{career_direction}** as your career direction. "
+                    f"The recommendation process also found this direction "
+                    f"supported by the model ranking."
+                )
                 preference_reason = (
-                    f"You also selected **{interest_area}** as an interest area and "
-                    f"**{career_direction}** as a career direction. These choices "
-                    f"differ from the direction most directly associated with your "
-                    f"current TVET trade. Because the selected direction is supported "
-                    f"by the model ranking, this recommendation reflects your transition "
-                    f"goal. Your existing TVET background remains part of the guidance, "
-                    f"and an academic advisor can help identify any additional "
-                    f"preparation needed."
+                    f"This recommendation represents a transition from "
+                    f"**{stream_or_trade}**, rather than a direct continuation "
+                    f"of your current TVET trade. Your TVET background and selected "
+                    f"competencies remain part of your learner profile, but they are "
+                    f"not presented as direct reasons for recommending **{program}**. "
+                    f"An academic advisor can help you plan the transition."
                 )
             else:
+                recommendation_reason = (
+                    f"**{program}** is recommended because your TVET training in "
+                    f"**{stream_or_trade}** is aligned with this academic direction."
+                )
                 preference_reason = (
                     f"Your interest in **{interest_area}** and your preferred career "
                     f"direction, **{career_direction}**, are also consistent with "
-                    f"this recommendation."
+                    f"this recommendation. Your selected strongest competency, "
+                    f"**{strongest_area}**, is retained for preparation planning "
+                    f"and discussion with an academic advisor."
                 )
         else:
             recommendation_reason = (
@@ -2218,7 +2228,26 @@ class RecommendationExplainer:
                 f"identifying this recommendation."
             )
 
-        if (
+        if is_tvet_transition:
+            if (
+                strongest_area.casefold() == support_area.casefold()
+                and strongest_area != "Not specified"
+            ):
+                support_reason = (
+                    f"You selected **{strongest_area}** as both your strongest "
+                    f"competency and the competency needing support within your "
+                    f"current TVET profile. Review this choice for accuracy. It is "
+                    f"not presented as direct preparation for **{program}**."
+                )
+            else:
+                support_reason = (
+                    f"You identified **{support_area}** as an area needing support "
+                    f"within your current TVET training. It remains part of your "
+                    f"learner profile, but it is not presented as a direct requirement "
+                    f"for **{program}**. The recommended bridge courses provide the "
+                    f"more relevant transition preparation."
+                )
+        elif (
             strongest_area.casefold() == support_area.casefold()
             and strongest_area != "Not specified"
         ):
@@ -3241,8 +3270,9 @@ elif selected_page == "Get Recommendation":
                     "Recommended Academic Program",
                     recommended_program,
                     (
-                        "This program is aligned with the learner’s education "
-                        "background, strengths, interests, and career direction."
+                        "This recommendation reflects the learner’s profile, "
+                        "interests, career direction, model ranking, and "
+                        "pathway review."
                     ),
                     "green",
                 )
