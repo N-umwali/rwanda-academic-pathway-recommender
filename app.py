@@ -1246,105 +1246,27 @@ BROAD_CATEGORY_DEFAULT_PROGRAM = {
     )
 }
 
-# Direct-guidance restrictions used by the deployed system. Stream 2
-# contains Mathematics, Economics, Geography, and Physics rather than
-# Biology and Chemistry, so health and laboratory fields are not returned
-# as the main recommendation for this stream. They may still be discussed
-# with an advisor as longer-term transition goals.
-STREAM_2_BLOCKED_BROAD_CATEGORIES = {
-    "Medicine and Surgery",
-    "Nursing and Midwifery",
-    "Pharmacy and Pharmaceutical Sciences",
-    "Biomedical Laboratory Sciences",
-    "Biotechnology and Applied Biosciences",
-}
-
-
-def is_broad_category_eligible_for_profile(broad_category, student_profile):
-    """Return whether a broad field is suitable as a direct recommendation."""
-
-    if student_profile.get("EducationType") != "General Education":
-        return True
-
-    is_stream_2 = (
-        student_profile.get("Pathway") == "Mathematics and Sciences"
-        and student_profile.get("Stream_or_Trade") == "Stream 2"
-    )
-
-    if is_stream_2 and broad_category in STREAM_2_BLOCKED_BROAD_CATEGORIES:
-        return False
-
-    return True
-
-
-def is_program_eligible_for_profile(program, student_profile):
-    """Return whether a specific program may be the main recommendation."""
-
-    broad_category = SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(program)
-    if broad_category is None:
-        return True
-
-    return is_broad_category_eligible_for_profile(
-        broad_category,
-        student_profile,
-    )
-
-
 def get_general_education_career_options(
     interest_area,
     pathway,
     stream_or_trade,
 ):
-    """Return career options compatible with the selected GE route."""
+    """
+    Return the programme directions associated with the learner's
+    selected interest area.
 
-    options = INTEREST_AREA_TO_CAREER_CLUSTERS.get(
-        interest_area,
-        PROGRAM_CATEGORY_OPTIONS,
+    Pathway and stream remain model inputs rather than post-model
+    programme filters.
+    """
+    del pathway, stream_or_trade
+
+    return list(
+        INTEREST_AREA_TO_CAREER_CLUSTERS.get(
+            interest_area,
+            PROGRAM_CATEGORY_OPTIONS,
+        )
     )
 
-    profile_context = {
-        "EducationType": "General Education",
-        "Pathway": pathway,
-        "Stream_or_Trade": stream_or_trade,
-    }
-
-    eligible_options = [
-        option
-        for option in options
-        if is_program_eligible_for_profile(option, profile_context)
-    ]
-
-    return eligible_options or [
-        option
-        for option in PROGRAM_CATEGORY_OPTIONS
-        if is_program_eligible_for_profile(option, profile_context)
-    ]
-
-# These families allow the model's broad category and an explicitly selected
-# closely related program to work together without replacing the SVM decision.
-RELATED_BROAD_CATEGORY_FAMILIES = [
-    {
-        "Medicine and Surgery",
-        "Nursing and Midwifery",
-        "Pharmacy and Pharmaceutical Sciences",
-        "Biomedical Laboratory Sciences",
-        "Biotechnology and Applied Biosciences",
-    },
-    {
-        "Computing, Software and Information Technology",
-        "Data Science, Statistics and Analytics",
-        "Engineering, Construction and Technical Systems",
-    },
-    {
-        "Languages, Communication and Media",
-        "Creative Arts, Fashion and Digital Design",
-    },
-    {
-        "Law, Governance and International Relations",
-        "Social Sciences, Psychology and Community Development",
-        "Education and Teacher Training",
-    },
-]
 
 FEATURE_DISPLAY_NAMES = {
     "EducationType": "education type",
@@ -1357,18 +1279,6 @@ FEATURE_DISPLAY_NAMES = {
     "DigitalSkillLevel": "digital skill level",
     "CareerCluster": "career direction",
 }
-
-
-def broad_categories_are_related(first_category, second_category):
-    """Return True when two broad categories belong to one related family."""
-
-    if first_category == second_category:
-        return True
-
-    return any(
-        first_category in family and second_category in family
-        for family in RELATED_BROAD_CATEGORY_FAMILIES
-    )
 
 
 def normalize_model_subject(value, column_name, education_type):
@@ -1542,18 +1452,17 @@ def format_course_list(courses):
 
 def get_model_ranking(student_profile):
     """
-    Return the SVM category ranking and select the highest-ranked field
-    that is compatible with the learner's academic route.
+    Return the SVM prediction and complete decision-score ranking.
 
-    The raw model prediction is retained for technical traceability, while
-    the selected class is used by recommendation refinement and SHAP so the
-    displayed guidance and explanation refer to the same eligible field.
+    The highest-scoring SVM class remains the final broad academic
+    field. No pathway, trade, interest, or career rule replaces the
+    trained model's prediction after inference.
     """
-
     student_df = prepare_student_dataframe(student_profile)
-    raw_predicted_class_id = int(MODEL.predict(student_df)[0])
-    raw_predicted_broad_category = LABEL_ENCODER.inverse_transform(
-        [raw_predicted_class_id]
+
+    predicted_class_id = int(MODEL.predict(student_df)[0])
+    predicted_broad_category = LABEL_ENCODER.inverse_transform(
+        [predicted_class_id]
     )[0]
 
     decision_scores = np.asarray(
@@ -1564,27 +1473,8 @@ def get_model_ranking(student_profile):
         ranked_class_ids
     ).tolist()
 
-    selected_position = next(
-        (
-            index
-            for index, broad_category in enumerate(
-                ranked_broad_categories
-            )
-            if is_broad_category_eligible_for_profile(
-                broad_category,
-                student_profile,
-            )
-        ),
-        0,
-    )
-
-    predicted_class_id = int(ranked_class_ids[selected_position])
-    predicted_broad_category = ranked_broad_categories[selected_position]
-
     return {
         "student_df": student_df,
-        "raw_predicted_class_id": raw_predicted_class_id,
-        "raw_predicted_broad_category": raw_predicted_broad_category,
         "predicted_class_id": predicted_class_id,
         "predicted_broad_category": predicted_broad_category,
         "decision_scores": decision_scores,
@@ -1593,246 +1483,24 @@ def get_model_ranking(student_profile):
     }
 
 
-def get_preferred_specific_program(student_profile):
-    """Read the learner's explicit program direction from the profile."""
-
-    selected_program = student_profile.get("CareerCluster")
-
-    if (
-        selected_program
-        and selected_program in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY
-    ):
-        return selected_program
-
-    if student_profile.get("EducationType") == "TVET":
-        return TVET_TRADE_TO_CAREER_CLUSTER.get(
-            student_profile.get("Stream_or_Trade"),
-            selected_program,
-        )
-
-    return selected_program
-
-
-def get_tvet_alignment_context(student_profile):
+def get_program_options(academic_field):
     """
-    Compare the learner's TVET trade with the selected
-    career direction.
+    Return catalogue programmes associated with the
+    SVM-predicted academic field.
     """
-
-    trade = str(
-        student_profile.get("Stream_or_Trade", "")
-    ).strip()
-
-    selected_program = str(
-        student_profile.get("CareerCluster", "")
-    ).strip()
-
-    trade_program = TVET_TRADE_TO_CAREER_CLUSTER.get(
-        trade
+    programs = BROAD_CATEGORY_TO_SPECIFIC_PROGRAMS.get(
+        academic_field,
+        [academic_field],
     )
 
-    trade_broad_category = (
-        SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(
-            trade_program
-        )
-    )
-
-    selected_broad_category = (
-        SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(
-            selected_program
-        )
-    )
-
-    return {
-        "trade_program": trade_program,
-        "trade_broad_category": trade_broad_category,
-        "selected_program": selected_program,
-        "selected_broad_category": selected_broad_category,
-        "same_specialisation": bool(
-            trade_program
-            and selected_program
-            and trade_program == selected_program
-        ),
-        "same_field": bool(
-            trade_broad_category
-            and selected_broad_category
-            and trade_broad_category
-            == selected_broad_category
-        ),
-    }
+    return format_course_list(programs)
 
 
-def refine_specific_program(student_profile, model_ranking):
+def get_alternative_academic_field(model_ranking):
     """
-    Refine the SVM broad field into a specific program.
-
-    General Education profiles may use the learner-selected
-    program when it is supported by the model.
-
-    TVET profiles may use the learner-selected career when its
-    broad field is supported by the trained model. The current
-    trade remains a fallback when the selected direction is not
-    sufficiently supported by the model ranking.
+    Return the SVM model's second-ranked academic field.
     """
-
-    predicted_broad_category = model_ranking[
-        "predicted_broad_category"
-    ]
-
-    ranked_broad_categories = model_ranking[
-        "ranked_broad_categories"
-    ]
-
-    if student_profile.get("EducationType") == "TVET":
-        alignment = get_tvet_alignment_context(
-            student_profile
-        )
-
-        trade_program = alignment[
-            "trade_program"
-        ]
-
-        trade_broad_category = alignment[
-            "trade_broad_category"
-        ]
-
-        selected_program = alignment[
-            "selected_program"
-        ]
-
-        selected_broad_category = alignment[
-            "selected_broad_category"
-        ]
-
-        # Respect the learner-selected TVET career when the
-        # trained model supports its broad academic field.
-        if (
-            selected_program
-            in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY
-            and selected_broad_category
-            and (
-                selected_broad_category
-                in ranked_broad_categories[:3]
-                or broad_categories_are_related(
-                    selected_broad_category,
-                    predicted_broad_category,
-                )
-            )
-        ):
-            return selected_program
-
-        # Otherwise, use the direct TVET trade continuation
-        # when the model supports that broad field.
-        if (
-            trade_program
-            and trade_broad_category
-            and (
-                trade_broad_category
-                in ranked_broad_categories[:3]
-                or broad_categories_are_related(
-                    trade_broad_category,
-                    predicted_broad_category,
-                )
-            )
-        ):
-            return trade_program
-
-        # Final fallback remains the SVM-predicted field.
-        return BROAD_CATEGORY_DEFAULT_PROGRAM.get(
-            predicted_broad_category,
-            trade_program or predicted_broad_category,
-        )
-
-    preferred_program = get_preferred_specific_program(
-        student_profile
-    )
-
-    preferred_broad_category = (
-        SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(
-            preferred_program
-        )
-    )
-
-    if (
-        preferred_program in SPECIFIC_PROGRAM_TO_BROAD_CATEGORY
-        and is_program_eligible_for_profile(
-            preferred_program,
-            student_profile,
-        )
-    ):
-        if (
-            preferred_broad_category
-            in ranked_broad_categories[:3]
-            or broad_categories_are_related(
-                preferred_broad_category,
-                predicted_broad_category,
-            )
-        ):
-            return preferred_program
-
-    interest_area = student_profile.get(
-        "InterestArea"
-    )
-
-    interest_candidates = (
-        INTEREST_AREA_TO_CAREER_CLUSTERS.get(
-            interest_area,
-            [],
-        )
-    )
-
-    for candidate in interest_candidates:
-        candidate_broad_category = (
-            SPECIFIC_PROGRAM_TO_BROAD_CATEGORY.get(
-                candidate
-            )
-        )
-
-        if (
-            candidate_broad_category
-            == predicted_broad_category
-            and is_program_eligible_for_profile(
-                candidate,
-                student_profile,
-            )
-        ):
-            return candidate
-
-    # When the raw SVM top class is incompatible with the learner's stream,
-    # keep the model-first design by selecting the highest-ranked compatible
-    # broad field rather than returning an unrelated or blocked programme.
-    selected_broad_category = next(
-        (
-            broad_category
-            for broad_category in ranked_broad_categories
-            if is_broad_category_eligible_for_profile(
-                broad_category,
-                student_profile,
-            )
-        ),
-        predicted_broad_category,
-    )
-
-    return BROAD_CATEGORY_DEFAULT_PROGRAM.get(
-        selected_broad_category,
-        preferred_program or selected_broad_category,
-    )
-
-
-def get_program_alternative(program, model_ranking):
-    """Return a related alternative pathway for advisor discussion."""
-
-    if program in DEFAULT_ALTERNATIVE_PATHWAY:
-        return DEFAULT_ALTERNATIVE_PATHWAY[program]
-
-    for broad_category in model_ranking["ranked_broad_categories"][1:]:
-        alternative_program = BROAD_CATEGORY_DEFAULT_PROGRAM.get(
-            broad_category
-        )
-        if alternative_program and alternative_program != program:
-            return alternative_program
-
-    return "A related diploma, foundation, or advisor-recommended pathway."
+    return model_ranking["ranked_broad_categories"][1]
 
 
 def get_grouped_model_explanation(student_profile, model_ranking):
@@ -1931,64 +1599,38 @@ def get_grouped_model_explanation(student_profile, model_ranking):
 @dataclass(frozen=True)
 class RecommendationResult:
     """
-    Structured recommendation output returned by the
-    academic pathway recommender.
+    Structured model-driven academic guidance output.
     """
 
-    program: str
+    academic_field: str
+    program_options: str
     bridge_courses: str
-    alternative_pathway: str
+    alternative_field: str
+    alternative_program_options: str
     source: str
-    raw_predicted_broad_category: str
-    predicted_broad_category: str
-    pathway_adjustment_applied: bool
-
-    def as_tuple(self):
-        """Maintain compatibility with the existing UI code."""
-
-        return (
-            self.program,
-            self.bridge_courses,
-            self.alternative_pathway,
-            self.source,
-        )
 
 
 class AcademicPathwayRecommender:
     """
-    Coordinate model ranking, program refinement,
-    bridge-course mapping, and alternative pathways.
-
-    This service keeps the recommendation workflow
-    separate from the Streamlit interface.
+    Coordinate SVM prediction, catalogue lookup,
+    bridge preparation, and alternative field guidance.
     """
 
-    def __init__(
-        self,
-        bridge_course_map=None,
-        broad_bridge_course_map=None,
-    ):
-        self.bridge_course_map = (
-            bridge_course_map
-            or PROGRAM_CATEGORY_TO_BRIDGE_COURSE
-        )
-
+    def __init__(self, broad_bridge_course_map=None):
         self.broad_bridge_course_map = (
             broad_bridge_course_map
             or MODEL_BROAD_CATEGORY_TO_BRIDGE_COURSE
         )
 
         self.source_label = (
-            "Learner profile and academic pathway guidance"
+            "SVM academic-field prediction and programme catalogue"
         )
 
     @staticmethod
     def _profile_dict(student_profile):
         """
-        Accept either a StudentProfile object or an existing
-        dictionary without changing the model input format.
+        Accept either a StudentProfile object or dictionary.
         """
-
         if isinstance(student_profile, StudentProfile):
             return student_profile.to_dict()
 
@@ -2000,81 +1642,57 @@ class AcademicPathwayRecommender:
             "object or dictionary."
         )
 
-    def _bridge_courses(
-        self,
-        recommended_program,
-        predicted_broad_category,
-    ):
+    def _bridge_courses(self, predicted_broad_category):
         """
-        Retrieve bridge courses from the specific-program
-        mapping, with a broad-field fallback.
+        Retrieve preparation areas for the SVM-predicted field.
         """
-
-        courses = self.bridge_course_map.get(
-            recommended_program
+        courses = self.broad_bridge_course_map.get(
+            predicted_broad_category,
+            [
+                "Academic Writing",
+                "Digital Literacy",
+                "Study Skills",
+            ],
         )
-
-        if courses is None:
-            courses = self.broad_bridge_course_map.get(
-                predicted_broad_category,
-                [
-                    "Academic Writing",
-                    "Digital Literacy",
-                    "Study Skills",
-                ],
-            )
 
         return format_course_list(courses)
 
     def recommend(self, student_profile):
         """
-        Generate one complete ML-first academic guidance
-        result from a learner profile.
+        Generate guidance directly from the SVM academic-field ranking.
         """
-
         profile = self._profile_dict(student_profile)
-
         model_ranking = get_model_ranking(profile)
 
-        recommended_program = refine_specific_program(
-            profile,
-            model_ranking,
-        )
-
-        recommended_bridge_course = (
-            self._bridge_courses(
-                recommended_program,
-                model_ranking[
-                    "predicted_broad_category"
-                ],
-            )
-        )
-
-        alternative_pathway = get_program_alternative(
-            recommended_program,
-            model_ranking,
-        )
-
-        raw_predicted_broad_category = model_ranking[
-            "raw_predicted_broad_category"
-        ]
-        predicted_broad_category = model_ranking[
+        academic_field = model_ranking[
             "predicted_broad_category"
         ]
 
+        program_options = get_program_options(
+            academic_field
+        )
+
+        bridge_courses = self._bridge_courses(
+            academic_field
+        )
+
+        alternative_field = get_alternative_academic_field(
+            model_ranking
+        )
+
+        alternative_program_options = get_program_options(
+            alternative_field
+        )
+
         return RecommendationResult(
-            program=recommended_program,
-            bridge_courses=recommended_bridge_course,
-            alternative_pathway=alternative_pathway,
+            academic_field=academic_field,
+            program_options=program_options,
+            bridge_courses=bridge_courses,
+            alternative_field=alternative_field,
+            alternative_program_options=(
+                alternative_program_options
+            ),
             source=self.source_label,
-            raw_predicted_broad_category=(
-                raw_predicted_broad_category
-            ),
-            predicted_broad_category=predicted_broad_category,
-            pathway_adjustment_applied=(
-                raw_predicted_broad_category
-                != predicted_broad_category
-            ),
         )
 
 
@@ -2096,211 +1714,108 @@ def recommend_student(student_profile):
 
 class RecommendationExplainer:
     """
-    Generate learner-friendly explanations using
-    genuine SHAP-supported model influences.
-
-    The class separates explanation responsibilities
-    from the Streamlit user interface.
+    Explain the SVM academic-field prediction and the
+    catalogue guidance linked to it.
     """
 
     def build(
         self,
         profile,
-        program,
+        academic_field,
+        program_options,
         bridge,
-        alternative,
+        alternative_field,
+        alternative_program_options,
         source,
     ):
-        """Create a clear explanation for learners and academic advisors."""
+        """Create a transparent learner-facing explanation."""
 
         def clean_value(value, fallback="Not specified"):
-            text = str(value or "").strip()
-            return text if text else fallback
+            text_value = str(value or "").strip()
+            return text_value or fallback
 
-        education_type = clean_value(profile.get("EducationType"))
-        pathway = clean_value(profile.get("Pathway"))
-        stream_or_trade = clean_value(profile.get("Stream_or_Trade"))
-        strongest_area = clean_value(profile.get("BestSubject"))
-        support_area = clean_value(profile.get("WeakestSubject"))
-        interest_area = clean_value(profile.get("InterestArea"))
-        career_direction = clean_value(profile.get("CareerCluster"))
-        score_range = clean_value(profile.get("AverageScoreRange"))
+        score_range = clean_value(
+            profile.get("AverageScoreRange")
+        )
 
         model_ranking = get_model_ranking(profile)
+
         explanation_rows = get_grouped_model_explanation(
             profile,
             model_ranking,
         )
-        most_influential = explanation_rows[:3]
 
-        if most_influential:
-            influence_items = [
-                f"**{row['display_name']}**"
-                for row in most_influential
-            ]
-            if len(influence_items) == 1:
-                influence_list = influence_items[0]
-            elif len(influence_items) == 2:
-                influence_list = (
-                    f"{influence_items[0]} and {influence_items[1]}"
-                )
-            else:
-                influence_list = (
-                    f"{influence_items[0]}, {influence_items[1]}, "
-                    f"and {influence_items[2]}"
-                )
+        influential_features = [
+            f"**{row['display_name']}**"
+            for row in explanation_rows[:3]
+        ]
 
-            influence_reason = (
-                f"Within the trained model, the profile factors with the greatest "
-                f"influence on the broad academic field ranking were your "
-                f"{influence_list}. The final program recommendation also considers "
-                f"your selected interest and career direction."
-            )
-        else:
-            influence_reason = (
-                "Your education background, strengths, interests, and career "
-                "direction were considered together when preparing this guidance."
-            )
-
-        is_tvet_transition = False
-
-        if education_type == "TVET":
-            expected_interest = clean_value(
-                TVET_TRADE_TO_INTEREST_AREA.get(stream_or_trade, ""),
-                "",
-            )
-            expected_career = clean_value(
-                TVET_TRADE_TO_CAREER_CLUSTER.get(stream_or_trade, ""),
-                "",
-            )
-
-            interest_is_different = (
-                expected_interest
-                and interest_area.casefold() != expected_interest.casefold()
-            )
-            career_is_different = (
-                expected_career
-                and career_direction.casefold() != expected_career.casefold()
-            )
-            is_tvet_transition = bool(
-                interest_is_different or career_is_different
-            )
-
-            if is_tvet_transition:
-                recommendation_reason = (
-                    f"**{program}** is recommended because you selected "
-                    f"**{interest_area}** as your interest area and "
-                    f"**{career_direction}** as your career direction. "
-                    f"The recommendation process also found this direction "
-                    f"supported by the model ranking."
-                )
-                preference_reason = (
-                    f"This recommendation represents a transition from "
-                    f"**{stream_or_trade}**, rather than a direct continuation "
-                    f"of your current TVET trade. Your TVET background and selected "
-                    f"competencies remain part of your learner profile, but they are "
-                    f"not presented as direct reasons for recommending **{program}**. "
-                    f"An academic advisor can help you plan the transition."
-                )
-            else:
-                recommendation_reason = (
-                    f"**{program}** is recommended because your TVET training in "
-                    f"**{stream_or_trade}** is aligned with this academic direction."
-                )
-                preference_reason = (
-                    f"Your interest in **{interest_area}** and your preferred career "
-                    f"direction, **{career_direction}**, are also consistent with "
-                    f"this recommendation. Your selected strongest competency, "
-                    f"**{strongest_area}**, is retained for preparation planning "
-                    f"and discussion with an academic advisor."
-                )
-        else:
-            recommendation_reason = (
-                f"**{program}** is recommended because your background in "
-                f"**{pathway}**, particularly **{stream_or_trade}**, provides a "
-                f"relevant starting point for this direction. Your strongest subject, "
-                f"**{strongest_area}**, also supports the knowledge and skills "
-                f"commonly required in this field."
-            )
-            preference_reason = (
-                f"Your interest in **{interest_area}** and your preferred career "
-                f"direction, **{career_direction}**, were also considered when "
-                f"identifying this recommendation."
-            )
-
-        if is_tvet_transition:
-            if (
-                strongest_area.casefold() == support_area.casefold()
-                and strongest_area != "Not specified"
-            ):
-                support_reason = (
-                    f"You selected **{strongest_area}** as both your strongest "
-                    f"competency and the competency needing support within your "
-                    f"current TVET profile. Review this choice for accuracy. It is "
-                    f"not presented as direct preparation for **{program}**."
-                )
-            else:
-                support_reason = (
-                    f"You identified **{support_area}** as an area needing support "
-                    f"within your current TVET training. It remains part of your "
-                    f"learner profile, but it is not presented as a direct requirement "
-                    f"for **{program}**. The recommended bridge courses provide the "
-                    f"more relevant transition preparation."
-                )
-        elif (
-            strongest_area.casefold() == support_area.casefold()
-            and strongest_area != "Not specified"
-        ):
-            support_reason = (
-                f"You selected **{strongest_area}** as both your strongest area and "
-                f"the area where you need support. Review this choice to make sure "
-                f"your profile accurately reflects your learning needs."
-            )
-        else:
-            support_reason = (
-                f"You identified **{support_area}** as an area needing support. "
-                f"Strengthening this area may improve your overall preparation for "
-                f"further study."
-            )
-
-        preparation_reason = (
-            f"To prepare for **{program}**, the recommended bridge courses are "
-            f"**{bridge}**. These courses can help strengthen the knowledge and "
-            f"practical skills commonly needed in this program."
+        influential_features = (
+            influential_features
+            or ["the available learner-profile factors"]
         )
 
-        if score_range == "50–59%":
-            readiness_reason = (
-                f"Your average score range is **50–59%**. This recommendation should "
-                f"be treated as a possible pathway rather than a confirmed admission "
-                f"match. Completing the suggested bridge preparation and speaking "
-                f"with an academic advisor will be especially important."
-            )
-        elif score_range == "60–69%":
-            readiness_reason = (
-                f"Your average score range is **60–69%**. Additional preparation in "
-                f"the recommended bridge areas may strengthen your readiness and "
-                f"improve your options."
-            )
-        else:
-            readiness_reason = (
-                f"Your average score range of **{score_range}** provides a useful "
-                f"starting point for this direction. Official admission requirements "
-                f"should still be confirmed with the institution."
-            )
+        influence_list = format_course_list(
+            influential_features
+        )
+
+        readiness_messages = {
+            "50–59%": (
+                "Your average score range is **50–59%**. Treat this "
+                "output as an exploration pathway rather than a "
+                "confirmed admission match. Bridge preparation and "
+                "advisor support are especially important."
+            ),
+            "60–69%": (
+                "Your average score range is **60–69%**. Completing "
+                "the suggested preparation may strengthen readiness "
+                "for programmes within this field."
+            ),
+        }
+
+        readiness_reason = readiness_messages.get(
+            score_range,
+            (
+                f"Your average score range of **{score_range}** is "
+                f"part of the profile processed by the model. Official "
+                f"programme entry requirements must still be confirmed "
+                f"with the relevant institution."
+            ),
+        )
 
         return (
-            f"{recommendation_reason}\n\n"
-            f"{preference_reason}\n\n"
-            f"{influence_reason}\n\n"
-            f"{support_reason}\n\n"
-            f"{preparation_reason}\n\n"
-            f"{readiness_reason}\n\n"
-            f"**Other academic programs to consider:** {alternative}\n\n"
-            f"This recommendation is intended to support exploration and discussion "
-            f"with an academic advisor. It is not an official admission decision."
-        )
+            f"**{academic_field}** is the highest-scoring broad "
+            f"academic field returned by the trained SVM for this "
+            f"learner profile. The application does not replace this "
+            f"prediction with pathway, TVET-trade, interest-area, or "
+            f"career-selection rules.\n\n"
 
+            f"Within the trained model, the profile factors with the "
+            f"greatest influence on this academic-field ranking were "
+            f"{influence_list}. These factors explain the model's "
+            f"ranking; they do not guarantee admission or prove that "
+            f"the learner is already prepared for every programme in "
+            f"the field.\n\n"
+
+            f"**Programmes to explore:** {program_options}. These are "
+            f"catalogue programmes associated with the predicted field. "
+            f"They were not individually predicted by the SVM.\n\n"
+
+            f"**Bridge preparation:** {bridge}. These preparation areas "
+            f"are linked to the predicted field and are advisory rather "
+            f"than official institutional prerequisites.\n\n"
+
+            f"**Alternative academic field:** {alternative_field}. "
+            f"This is the model's second-ranked broad field. Related "
+            f"catalogue programmes include "
+            f"{alternative_program_options}.\n\n"
+
+            f"{readiness_reason}\n\n"
+
+            f"**Guidance source:** {source}. This output supports "
+            f"exploration and discussion with an academic advisor. "
+            f"It is not an official admission decision."
+        )
 
 
 EXPLAINER = RecommendationExplainer()
@@ -2308,22 +1823,38 @@ EXPLAINER = RecommendationExplainer()
 
 def build_explanation(
     profile,
-    program,
+    academic_field,
+    program_options,
     bridge,
-    alternative,
+    alternative_field,
+    alternative_program_options,
     source,
 ):
-    """Compatibility wrapper for the existing UI."""
+    """Build the learner-facing model explanation."""
 
     return EXPLAINER.build(
         profile=profile,
-        program=program,
+        academic_field=academic_field,
+        program_options=program_options,
         bridge=bridge,
-        alternative=alternative,
+        alternative_field=alternative_field,
+        alternative_program_options=(
+            alternative_program_options
+        ),
         source=source,
     )
 
-def make_guidance_report(profile, program, bridge, alternative, source, explanation):
+
+def make_guidance_report(
+    profile,
+    academic_field,
+    program_options,
+    bridge,
+    alternative_field,
+    alternative_program_options,
+    source,
+    explanation,
+):
     return f"""# Rwanda Academic Guidance Report
 
 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -2337,20 +1868,23 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 - Interest Area: {profile.get('InterestArea')}
 - Average Score Range: {profile.get('AverageScoreRange')}
 - Digital Skill Level: {profile.get('DigitalSkillLevel')}
-- Career Cluster: {profile.get('CareerCluster')}
+- Career Direction: {profile.get('CareerCluster')}
 
-## Recommendation Output
-- Recommended Academic Program Category: {program}
-- Recommended Bridge Course: {bridge}
-- Alternative Academic Programs: {alternative}
-- Recommendation Source: {source}
+## Model and Catalogue Output
+- SVM-Predicted Academic Field: {academic_field}
+- Programmes to Explore: {program_options}
+- Recommended Bridge Preparation: {bridge}
+- Alternative Academic Field: {alternative_field}
+- Alternative Programmes to Explore: {alternative_program_options}
+- Guidance Source: {source}
 
 ## Explanation
 {explanation}
 
 ## Responsible Use
-This report is generated by an academic decision-support system. It is not an official MINEDUC, REB, RTB, or university admission decision. Final decisions should be confirmed with official admission requirements, academic advisors, and relevant institutions.
+This report is generated by an academic decision-support system. The SVM predicts a broad academic field, while programme and bridge-preparation lists are catalogue guidance. It is not an official MINEDUC, REB, RTB, or university admission decision. Final decisions should be confirmed using official institutional requirements and professional academic guidance.
 """
+
 
 # =========================================================
 # VISUAL ASSET HELPERS (icons, photos, watermark, banners)
@@ -3077,7 +2611,7 @@ if selected_page == "Home":
             ("01", "Learner Profile", "Education type, pathway, strengths, interests, and career direction are recorded.", "workflow/learner-profile.svg"),
             ("02", "Data Processing", "The profile is translated into the trained model's input format.", "workflow/data-processing.svg"),
             ("03", "ML Category Ranking", "The trained model ranks broad academic categories from the learner's profile.", "workflow/ml-prediction.svg"),
-            ("04", "Pathway Compatibility Review", "The highest-ranked category compatible with the learner's education route is selected.", "workflow/eligibility-filter.svg"),
+            ("04", "Programme Catalogue Lookup", "Programmes linked to the SVM-predicted academic field are presented for exploration.", "workflow/eligibility-filter.svg"),
             ("05", "Program and Bridge Mapping", "A specific program and relevant bridge courses are mapped from the selected category.", "workflow/bridge-mapping.svg"),
             ("06", "Explainable Advisor Review", "The recommendation and its main influencing factors are presented for advisor discussion.", "workflow/advisor-review.svg"),
         ]
@@ -3201,31 +2735,30 @@ elif selected_page == "Get Recommendation":
                         learner_profile
                     )
 
-                    recommended_program = (
-                        recommendation_result.program
+                    academic_field = (
+                        recommendation_result.academic_field
+                    )
+                    program_options = (
+                        recommendation_result.program_options
                     )
                     recommended_bridge_course = (
                         recommendation_result.bridge_courses
                     )
-                    alternative_pathway = (
-                        recommendation_result.alternative_pathway
+                    alternative_field = (
+                        recommendation_result.alternative_field
+                    )
+                    alternative_program_options = (
+                        recommendation_result
+                        .alternative_program_options
                     )
                     source = recommendation_result.source
-
-                    raw_model_category = (
-                        recommendation_result
-                        .raw_predicted_broad_category
-                    )
-                    reviewed_model_category = (
-                        recommendation_result
-                        .predicted_broad_category
-                    )
-                    pathway_adjustment_applied = (
-                        recommendation_result
-                        .pathway_adjustment_applied
-                    )
+                    model_category = academic_field
                 except Exception as e:
-                    st.error("The system could not process this learner profile. Please confirm that the saved model matches the dashboard input features.")
+                    st.error(
+                        "The system could not process this learner profile. "
+                        "Please confirm that the saved model matches the "
+                        "dashboard input features."
+                    )
                     st.exception(e)
                     st.stop()
 
@@ -3233,65 +2766,70 @@ elif selected_page == "Get Recommendation":
                     "How this recommendation was prepared"
                 ):
                     st.markdown(
-                        "**Initial academic field identified:** "
-                        f"{raw_model_category}"
+                        "**SVM-predicted academic field:** "
+                        f"{model_category}"
                     )
-
-                    if pathway_adjustment_applied:
-                        st.info(
-                            "After reviewing the learner’s academic "
-                            "pathway, the most suitable compatible field "
-                            "was identified as: "
-                            f"{reviewed_model_category}"
-                        )
-                    else:
-                        st.success(
-                            "This academic field is consistent with the "
-                            "learner’s current pathway: "
-                            f"{reviewed_model_category}"
-                        )
-
                     st.caption(
-                        "The system combines the learner’s academic "
-                        "profile with a trained machine-learning model "
-                        "and pathway compatibility checks before "
-                        "suggesting a specific academic program."
+                        "The trained SVM uses the learner profile to rank "
+                        "broad academic fields. The programme lists and "
+                        "bridge preparation are catalogue lookups linked to "
+                        "the predicted field; they do not replace or modify "
+                        "the model prediction."
                     )
 
                 explanation = build_explanation(
                     profile,
-                    recommended_program,
+                    academic_field,
+                    program_options,
                     recommended_bridge_course,
-                    alternative_pathway,
+                    alternative_field,
+                    alternative_program_options,
                     source,
                 )
 
                 result_card(
-                    "Recommended Academic Program",
-                    recommended_program,
+                    "SVM-Predicted Academic Field",
+                    academic_field,
                     (
-                        "This recommendation reflects the learner’s profile, "
-                        "interests, career direction, model ranking, and "
-                        "pathway review."
+                        "This is the highest-scoring broad academic field "
+                        "returned by the trained SVM."
                     ),
                     "green",
                 )
                 result_card(
-                    "Recommended Bridge Courses",
-                    recommended_bridge_course,
+                    "Programmes to Explore",
+                    program_options,
                     (
-                        "These courses can help the learner strengthen readiness "
-                        "for the recommended program."
+                        "These programmes belong to the predicted academic "
+                        "field. They are catalogue options, not separate "
+                        "model predictions."
                     ),
                     "blue",
                 )
                 result_card(
-                    "Alternative Academic Programs",
-                    alternative_pathway,
+                    "Recommended Bridge Preparation",
+                    recommended_bridge_course,
                     (
-                         "These are other suitable academic programs the learner "
-                         "may consider if the primary recommendation does not match "
-                         "their interests or preferred career direction."
+                        "These preparation areas are linked to the "
+                        "SVM-predicted academic field."
+                    ),
+                    "gold",
+                )
+                result_card(
+                    "Alternative Academic Field",
+                    alternative_field,
+                    (
+                        "This is the model's second-ranked broad academic "
+                        "field for further discussion."
+                    ),
+                    "purple",
+                )
+                result_card(
+                    "Alternative Programmes to Explore",
+                    alternative_program_options,
+                    (
+                        "These catalogue programmes belong to the "
+                        "second-ranked academic field."
                     ),
                     "purple",
                 )
@@ -3299,8 +2837,8 @@ elif selected_page == "Get Recommendation":
                     "How This Guidance Was Prepared",
                     source,
                     (
-                        "The guidance considers the learner’s education background, "
-                        "strengths, interests, career direction, and readiness."
+                        "The learner profile was processed by the trained "
+                        "SVM, followed by transparent catalogue lookups."
                     ),
                     "gold",
                 )
@@ -3308,7 +2846,16 @@ elif selected_page == "Get Recommendation":
                 st.markdown("### Explanation of the Recommendation")
                 st.markdown(explanation)
 
-                report = make_guidance_report(profile, recommended_program, recommended_bridge_course, alternative_pathway, source, explanation)
+                report = make_guidance_report(
+                    profile,
+                    academic_field,
+                    program_options,
+                    recommended_bridge_course,
+                    alternative_field,
+                    alternative_program_options,
+                    source,
+                    explanation,
+                )
 
                 report_photo_uri = image_data_uri(HERO_PHOTO)
                 if report_photo_uri:
@@ -3329,8 +2876,8 @@ elif selected_page == "Get Recommendation":
                     mime="text/markdown",
                 )
             else:
-                result_card("Recommended Academic Program Category", "Awaiting learner profile", "Complete the form and click Generate Recommendation to view the suggested category.", "green")
-                result_card("Recommended Bridge Course", "Awaiting recommendation", "These preparatory courses are aligned with the recommended academic program category.", "blue")
+                result_card("SVM-Predicted Academic Field", "Awaiting learner profile", "Complete the form and click Generate Recommendation to view the model-ranked academic field.", "green")
+                result_card("Recommended Bridge Preparation", "Awaiting prediction", "Preparation areas linked to the predicted academic field will appear here.", "blue")
                 result_card("Explainability Summary", "Awaiting profile", "The explanation will show the model-ranked field and the profile inputs that most influenced it.", "purple")
 
 elif selected_page == "Advisor Dashboard":
@@ -3347,12 +2894,12 @@ elif selected_page == "Methodology":
         METHODOLOGY_PHOTO,
         "System Methodology",
         "How the System Works",
-        "The system follows an ML-first guidance architecture: learner profile input, machine learning ranking of broad academic fields, pathway-aware refinement, bridge-course mapping, alternative pathway guidance, SHAP-supported explainability, and feedback collection.",
+        "The system follows an ML-first guidance architecture: learner profile input, SVM ranking of broad academic fields, programme catalogue lookup, bridge-preparation mapping, second-ranked field guidance, SHAP-supported explainability, and feedback collection.",
     )
     c1, c2, c3 = st.columns(3)
     with c1: icon_card("Input Features", "Education Type, Pathway, Stream or TVET Trade, Strongest Subject, Weakest Subject, Interest Area, Average Score Range, Digital Skill Level, and Career Cluster.", "content/file-text.svg")
-    with c2: icon_card("Prediction Layer", "The saved SVM ranks broad academic program categories first. The guidance layer then refines the result using the learner's academic pathway or TVET trade.", "workflow/ml-prediction.svg")
-    with c3: icon_card("Bridge Mapping", "The bridge course is mapped from the recommended program category to keep the output consistent with the training notebook.", "workflow/bridge-mapping.svg")
+    with c2: icon_card("Prediction Layer", "The saved SVM ranks broad academic fields using the learner profile. The highest-scoring field remains the final model prediction.", "workflow/ml-prediction.svg")
+    with c3: icon_card("Bridge Mapping", "Bridge preparation is retrieved from the catalogue associated with the SVM-predicted academic field.", "workflow/bridge-mapping.svg")
     c4, c5 = st.columns(2)
     with c4: icon_card("Explainability", "The explanation summarizes how the learner profile connects to the recommendation.", "content/message-square-text.svg")
     with c5: icon_card("Responsible Use", "The output is advisory and should be reviewed with official entry requirements and academic advisors.", "content/shield-check.svg")
